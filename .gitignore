@@ -1,0 +1,4 @@
+**/.vscode
+**/*.sh
+**/Makefile
+**/__pycache__
