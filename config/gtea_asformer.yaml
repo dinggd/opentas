@@ -1,0 +1,23 @@
+DATA: 
+  PATH: "/home/dinggd/datasets"
+  DATASET: "gtea"
+  SAMPLE_RATE: 1
+  FEATURE_DIM: 2048
+  SPLIT: 1
+
+MODEL:
+  NAME: 'asformer'
+
+ASFORMER:
+  NUM_STAGES: 4
+  NUM_LAYERS: 10
+  NUM_F_MAPS: 64
+  NUM_DECODERS: 4
+  CHANNEL_MASK_RATE: 0.5
+  R1: 2
+  R2: 2
+
+TRAIN:
+  BZ: 1
+  LR: 0.0005
+  NUM_EPOCHS: 30

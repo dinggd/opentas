@@ -7,6 +7,7 @@ import logging
 
 from model.base import BaseTrainer
 
+
 class MultiStageModel(nn.Module):
     def __init__(self, num_stages, num_layers, num_f_maps, dim, num_classes):
         super(MultiStageModel, self).__init__()
@@ -22,42 +23,6 @@ class MultiStageModel(nn.Module):
             out = s(F.softmax(out, dim=1) * mask[:, 0:1, :], mask)
             outputs = torch.cat((outputs, out.unsqueeze(0)), dim=0)
         return outputs
-
-    def update_fcs(self, num_classes):
-        input_out, input_in, _ = self.stages[0].conv_1x1.weight.shape
-        logging.info(
-            f'Updating the stage input heads form {input_in} to {num_classes}')
-        #  input shape change: no need for first stage, but necessary for following stages
-        for layer in self.stages:
-            weight = copy.deepcopy(layer.conv_1x1.weight.data)
-            bias = copy.deepcopy(layer.conv_1x1.bias.data)
-            new_conv_1x1 = nn.Conv1d(num_classes, input_out, 1)
-            new_conv_1x1.weight.data[:,:input_in,:] = weight
-            new_conv_1x1.bias.data = bias
-            del layer.conv_1x1
-            layer.conv_1x1 = new_conv_1x1
-
-        
-        output_out, output_in, _ = self.stages[0].conv_out.weight.shape
-        logging.info(
-            f'Updating the stage output heads form {output_out} to {num_classes}')
-        #  out shape change: first stage
-        weight = copy.deepcopy(self.stage1.conv_out.weight.data)
-        bias = copy.deepcopy(self.stage1.conv_out.bias.data)
-        new_fc = nn.Conv1d(output_in, num_classes, 1)
-        new_fc.weight.data[:output_out] = weight
-        new_fc.bias.data[:output_out] = bias
-        del self.stage1.conv_out
-        self.stage1.conv_out = new_fc
-        # out shape change: following stages
-        for layer in self.stages:
-            weight = copy.deepcopy(layer.conv_out.weight.data)
-            bias = copy.deepcopy(layer.conv_out.bias.data)
-            new_fc = nn.Conv1d(output_in, num_classes, 1)
-            new_fc.weight.data[:output_out] = weight
-            new_fc.bias.data[:output_out] = bias
-            del layer.conv_out
-            layer.conv_out = new_fc
 
 
 class SingleStageModel(nn.Module):
@@ -101,7 +66,7 @@ class MSTCNTrainer(BaseTrainer):
 
     # Override
     def get_optimizers(self, learning_rate):
-        return [ optim.Adam(self.model.parameters(), lr=learning_rate) ]
+        return [optim.Adam(self.model.parameters(), lr=learning_rate)]
 
     # Override
     def get_schedulers(self, optimizers):
@@ -111,16 +76,18 @@ class MSTCNTrainer(BaseTrainer):
     def calc_loss(self, predictions, batch_target, mask, predictions_old=None):
         # predictions_old is for LwF
         loss = 0
-        for i,p in enumerate(predictions):
+        for i, p in enumerate(predictions):
             loss += self.ce(p.transpose(2, 1).contiguous().view(-1,
                             self.num_classes), batch_target.view(-1))
             loss += 0.15*torch.mean(torch.clamp(self.mse(F.log_softmax(p[:, :, 1:], dim=1), F.log_softmax(
                 p.detach()[:, :, :-1], dim=1)), min=0, max=16)*mask[:, :, 1:])
             if predictions_old is not None:
-                p_flat = p.transpose(2,1).contiguous.view(-1,self.num_classes)
+                p_flat = p.transpose(
+                    2, 1).contiguous.view(-1, self.num_classes)
                 known_classes = predictions_old.shape[1]
-                p_old_flat = predictions_old[i].transpose(2,1).contiguous.view(-1,known_classes)
-                loss -= (torch.mul(torch.softmax(p_old_flat[:,:known_classes], dim=1), 
-                                  torch.log_softmax(p_flat, dim=1)
-                                  )*mask.flatten()).sum() / p_flat.shape[0]
+                p_old_flat = predictions_old[i].transpose(
+                    2, 1).contiguous.view(-1, known_classes)
+                loss -= (torch.mul(torch.softmax(p_old_flat[:, :known_classes], dim=1),
+                                   torch.log_softmax(p_flat, dim=1)
+                                   )*mask.flatten()).sum() / p_flat.shape[0]
         return loss

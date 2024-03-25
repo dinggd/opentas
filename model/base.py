@@ -1,21 +1,27 @@
 from tqdm import tqdm
 import logging
+from abc import ABC
 import torch
 import numpy as np
 from copy import deepcopy
 
 from eval import read_file, edit_score, f_score
 
-class BaseTrainer:
-    '''NOTE: All concrete classes of this must initialize self.model and self.num_classes'''
-    def train(self, save_dir, batch_gen, num_epochs, batch_size, learning_rate, device):
-            
+
+class BaseTrainer(ABC):
+    """NOTE: All concrete classes of this must initialize self.model and self.num_classes"""
+
+    def __init__(self):
+        super().__init__()
+        self.model = None
+
+    def train(self, batch_gen, save_dir, num_epochs, batch_size, learning_rate):
         self.model.train()
-        self.model.to(device)
+        self.model.cuda()
 
         optimizers = self.get_optimizers(learning_rate)
         schedulers = self.get_schedulers(optimizers)
-        
+
         for epoch in tqdm(range(num_epochs)):
             epoch_loss = 0
             correct = 0
@@ -23,14 +29,17 @@ class BaseTrainer:
             while batch_gen.has_next():
                 batch_input, batch_target, mask = batch_gen.next_batch(
                     batch_size)
-                batch_input, batch_target, mask = batch_input.to(
-                    device), batch_target.to(device), mask.to(device)
+                batch_input, batch_target, mask = (
+                    batch_input.cuda(),
+                    batch_target.cuda(),
+                    mask.cuda(),
+                )
                 predictions = self.model(batch_input, mask)
 
                 loss = self.calc_loss(predictions, batch_target, mask)
 
                 epoch_loss += loss.item()
-                
+
                 for optimizer in optimizers:
                     optimizer.zero_grad()
                 loss.backward()
@@ -38,8 +47,8 @@ class BaseTrainer:
                     optimizer.step()
 
                 _, predicted = torch.max(predictions[-1].data, 1)
-                correct += ((predicted == batch_target).float() *
-                            mask[:, 0, :].squeeze(1)).sum().item()
+                correct += torch.sum((predicted == batch_target).float()
+                                     * mask[:, 0, :].squeeze(1)).item()
                 total += torch.sum(mask[:, 0, :]).item()
 
             for scheduler in schedulers:
@@ -47,11 +56,16 @@ class BaseTrainer:
             batch_gen.reset()
 
         torch.save(self.model.state_dict(),
-                   f'{save_dir}/epoch-{epoch + 1}.model')
-        torch.save(optimizer.state_dict(),
-                   f'{save_dir}/epoch-{epoch + 1}.opt')
-        logging.info("[epoch %d]: epoch loss = %f,   acc = %f" % (
-            epoch + 1, epoch_loss / len(batch_gen.list_of_examples), float(correct)/total))
+                   f"{save_dir}/epoch-{epoch + 1}.model")
+        torch.save(optimizer.state_dict(), f"{save_dir}/epoch-{epoch + 1}.opt")
+        logging.info(
+            "[epoch %d]: epoch loss = %f,   acc = %f"
+            % (
+                epoch + 1,
+                epoch_loss / len(batch_gen.list_of_examples),
+                float(correct) / total,
+            )
+        )
 
     def get_optimizers(self, learning_rate):
         raise NotImplementedError()
@@ -62,71 +76,79 @@ class BaseTrainer:
     def calc_loss(self, predictions, batch_target, mask):
         raise NotImplementedError()
 
-    def predict(self, model_dir, results_dir, features_path, vid_list_file, epoch, actions_dict, device, 
-                sample_rate, gt_path):
+    def predict(
+        self,
+        results_dir,
+        features_path,
+        vid_list_file,
+        actions_dict,
+        sample_rate,
+        gt_path,
+    ):
 
-        file_ptr = open(vid_list_file, 'r')
-        list_of_vids = file_ptr.read().split('\n')[:-1]
-        file_ptr.close()
+        if not isinstance(actions_dict, dict):
+            actions_dict = dict(actions_dict)
+
+        with open(vid_list_file, "r") as f:
+            list_of_vids = f.read().splitlines()
 
         self.model.eval()
         with torch.no_grad():
-            self.model.to(device)
-            
-            for vid in list_of_vids:
-                features = np.load(features_path + vid.split('.')[0] + '.npy')
-                features = features[:, ::sample_rate]
-                input_x = torch.tensor(features, dtype=torch.float)
-                input_x.unsqueeze_(0)
-                input_x = input_x.to(device)
-                predictions = self.model(
-                    input_x, torch.ones(input_x.size(), device=device))
-                _, predicted = torch.max(predictions[-1].data, 1)
-                predicted = predicted.squeeze()
-                recognition = []
-                for i in range(len(predicted)):
-                    recognition = np.concatenate((recognition, [list(actions_dict.keys())[list(
-                        actions_dict.values()).index(predicted[i].item())]]*sample_rate))
-                f_name = vid.split('/')[-1].split('.')[0]
-                f_ptr = open(results_dir + "/" + f_name, "w")
-                f_ptr.write("### Frame level recognition: ###\n")
-                f_ptr.write(' '.join(recognition))
-                f_ptr.close()
+            self.model.cuda()
 
-        overlap = [.1, .25, .5]
+            for vid in list_of_vids:
+                features = np.load(f"{features_path}{vid.split('.')[0]}.npy")[
+                    :, ::sample_rate
+                ]
+                input_x = torch.tensor(
+                    features, dtype=torch.float).unsqueeze(0).cuda()
+                predictions = self.model(
+                    input_x, torch.ones(input_x.size()).cuda())
+                predicted_classes = [
+                    list(actions_dict.keys())[
+                        list(actions_dict.values()).index(pred.item())
+                    ]
+                    for pred in torch.max(predictions[-1].data, 1)[1].squeeze()
+                ] * sample_rate
+                f_name = vid.split("/")[-1].split(".")[0]
+                with open(f"{results_dir}/{f_name}", "w") as f:
+                    f.write("### Frame level recognition: ###\n")
+                    f.write(" ".join(predicted_classes))
+
+        overlap = [0.1, 0.25, 0.5]
         tp, fp, fn = np.zeros(3), np.zeros(3), np.zeros(3)
 
-        correct,total,edit = 0, 0, 0
+        correct, total, edit = 0, 0, 0
 
         for vid in list_of_vids:
             gt_file = gt_path + vid
-            gt_content = read_file(gt_file).split('\n')[0:-1]
-            recog_file = results_dir+'/' + vid.split('.')[0]
-            recog_content = read_file(recog_file).split('\n')[1].split()
+            gt_content = read_file(gt_file).split("\n")[0:-1]
+            recog_file = results_dir + "/" + vid.split(".")[0]
+            recog_content = read_file(recog_file).split("\n")[1].split()
 
-            for i in range(len(gt_content)):
-                total += 1
-                if gt_content[i] == recog_content[i]:
-                    correct += 1
+            total += len(gt_content)
+            correct += sum(1 for gt, recog in zip(gt_content,
+                           recog_content) if gt == recog)
 
             edit += edit_score(recog_content, gt_content)
 
-            for s in range(len(overlap)):
-                tp1, fp1, fn1 = f_score(recog_content, gt_content, overlap[s])
-                tp[s] += tp1
-                fp[s] += fp1
-                fn[s] += fn1
+            for idx, thres in enumerate(overlap):
+                tp1, fp1, fn1 = f_score(recog_content, gt_content, thres)
+                tp[idx] += tp1
+                fp[idx] += fp1
+                fn[idx] += fn1
 
         final = []
-        final.append((100*float(correct)/total))
-        final.append((1.0*edit)/len(list_of_vids))
-        for s in range(len(overlap)):
-            precision = tp[s] / float(tp[s]+fp[s])
-            recall = tp[s] / float(tp[s]+fn[s])
+        final.append((100 * float(correct) / total))
+        final.append((1.0 * edit) / len(list_of_vids))
 
-            f1 = 2.0 * (precision*recall) / (precision+recall)
+        for idx, thres in enumerate(overlap):
+            precision = tp[idx] / float(tp[idx] + fp[idx])
+            recall = tp[idx] / float(tp[idx] + fn[idx])
 
-            f1 = np.nan_to_num(f1)*100
+            f1 = 2.0 * (precision * recall) / (precision + recall)
+
+            f1 = np.nan_to_num(f1) * 100
             final.append(f1)
 
         return final

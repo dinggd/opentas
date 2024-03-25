@@ -2,3 +2,6 @@
 **/*.sh
 **/Makefile
 **/__pycache__
+**/debug
+**/exps
+**/*.json
