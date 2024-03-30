@@ -11,10 +11,15 @@ from model.base import BaseTrainer
 class MultiStageModel(nn.Module):
     def __init__(self, num_stages, num_layers, num_f_maps, dim, num_classes):
         super(MultiStageModel, self).__init__()
-        self.stage1 = SingleStageModel(
-            num_layers, num_f_maps, dim, num_classes)
-        self.stages = nn.ModuleList([copy.deepcopy(SingleStageModel(
-            num_layers, num_f_maps, num_classes, num_classes)) for s in range(num_stages-1)])
+        self.stage1 = SingleStageModel(num_layers, num_f_maps, dim, num_classes)
+        self.stages = nn.ModuleList(
+            [
+                copy.deepcopy(
+                    SingleStageModel(num_layers, num_f_maps, num_classes, num_classes)
+                )
+                for s in range(num_stages - 1)
+            ]
+        )
 
     def forward(self, x, mask):
         out = self.stage1(x, mask)
@@ -29,8 +34,12 @@ class SingleStageModel(nn.Module):
     def __init__(self, num_layers, num_f_maps, dim, num_classes):
         super(SingleStageModel, self).__init__()
         self.conv_1x1 = nn.Conv1d(dim, num_f_maps, 1)
-        self.layers = nn.ModuleList([copy.deepcopy(DilatedResidualLayer(
-            2 ** i, num_f_maps, num_f_maps)) for i in range(num_layers)])
+        self.layers = nn.ModuleList(
+            [
+                copy.deepcopy(DilatedResidualLayer(2**i, num_f_maps, num_f_maps))
+                for i in range(num_layers)
+            ]
+        )
         self.conv_out = nn.Conv1d(num_f_maps, num_classes, 1)
 
     def forward(self, x, mask):
@@ -45,7 +54,8 @@ class DilatedResidualLayer(nn.Module):
     def __init__(self, dilation, in_channels, out_channels):
         super(DilatedResidualLayer, self).__init__()
         self.conv_dilated = nn.Conv1d(
-            in_channels, out_channels, 3, padding=dilation, dilation=dilation)
+            in_channels, out_channels, 3, padding=dilation, dilation=dilation
+        )
         self.conv_1x1 = nn.Conv1d(out_channels, out_channels, 1)
         self.dropout = nn.Dropout()
 
@@ -59,9 +69,10 @@ class DilatedResidualLayer(nn.Module):
 class MSTCNTrainer(BaseTrainer):
     def __init__(self, num_blocks, num_layers, num_f_maps, dim, num_classes):
         self.model = MultiStageModel(
-            num_blocks, num_layers, num_f_maps, dim, num_classes)
+            num_blocks, num_layers, num_f_maps, dim, num_classes
+        )
         self.ce = nn.CrossEntropyLoss(ignore_index=-100)
-        self.mse = nn.MSELoss(reduction='none')
+        self.mse = nn.MSELoss(reduction="none")
         self.num_classes = num_classes
 
     # Override
@@ -73,21 +84,23 @@ class MSTCNTrainer(BaseTrainer):
         return []
 
     # Override
-    def calc_loss(self, predictions, batch_target, mask, predictions_old=None):
+    def calc_loss(self, predictions, batch_target, mask):
         # predictions_old is for LwF
         loss = 0
         for i, p in enumerate(predictions):
-            loss += self.ce(p.transpose(2, 1).contiguous().view(-1,
-                            self.num_classes), batch_target.view(-1))
-            loss += 0.15*torch.mean(torch.clamp(self.mse(F.log_softmax(p[:, :, 1:], dim=1), F.log_softmax(
-                p.detach()[:, :, :-1], dim=1)), min=0, max=16)*mask[:, :, 1:])
-            if predictions_old is not None:
-                p_flat = p.transpose(
-                    2, 1).contiguous.view(-1, self.num_classes)
-                known_classes = predictions_old.shape[1]
-                p_old_flat = predictions_old[i].transpose(
-                    2, 1).contiguous.view(-1, known_classes)
-                loss -= (torch.mul(torch.softmax(p_old_flat[:, :known_classes], dim=1),
-                                   torch.log_softmax(p_flat, dim=1)
-                                   )*mask.flatten()).sum() / p_flat.shape[0]
+            loss += self.ce(
+                p.transpose(2, 1).contiguous().view(-1, self.num_classes),
+                batch_target.view(-1),
+            )
+            loss += 0.15 * torch.mean(
+                torch.clamp(
+                    self.mse(
+                        F.log_softmax(p[:, :, 1:], dim=1),
+                        F.log_softmax(p.detach()[:, :, :-1], dim=1),
+                    ),
+                    min=0,
+                    max=16,
+                )
+                * mask[:, :, 1:]
+            )
         return loss
