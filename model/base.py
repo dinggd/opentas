@@ -3,17 +3,12 @@ import logging
 from abc import ABC
 import torch
 import numpy as np
-from copy import deepcopy
 
 from eval import read_file, edit_score, f_score
 
 
 class BaseTrainer(ABC):
     """NOTE: All concrete classes of this must initialize self.model and self.num_classes"""
-
-    def __init__(self):
-        super().__init__()
-        self.model = None
 
     def train(self, batch_gen, save_dir, num_epochs, batch_size, learning_rate):
         self.model.train()
@@ -27,8 +22,7 @@ class BaseTrainer(ABC):
             correct = 0
             total = 0
             while batch_gen.has_next():
-                batch_input, batch_target, mask = batch_gen.next_batch(
-                    batch_size)
+                batch_input, batch_target, mask = batch_gen.next_batch(batch_size)
                 batch_input, batch_target, mask = (
                     batch_input.cuda(),
                     batch_target.cuda(),
@@ -47,16 +41,16 @@ class BaseTrainer(ABC):
                     optimizer.step()
 
                 _, predicted = torch.max(predictions[-1].data, 1)
-                correct += torch.sum((predicted == batch_target).float()
-                                     * mask[:, 0, :].squeeze(1)).item()
+                correct += torch.sum(
+                    (predicted == batch_target).float() * mask[:, 0, :].squeeze(1)
+                ).item()
                 total += torch.sum(mask[:, 0, :]).item()
 
             for scheduler in schedulers:
                 scheduler.step(epoch_loss)
             batch_gen.reset()
 
-        torch.save(self.model.state_dict(),
-                   f"{save_dir}/epoch-{epoch + 1}.model")
+        torch.save(self.model.state_dict(), f"{save_dir}/epoch-{epoch + 1}.model")
         torch.save(optimizer.state_dict(), f"{save_dir}/epoch-{epoch + 1}.opt")
         logging.info(
             "[epoch %d]: epoch loss = %f,   acc = %f"
@@ -85,7 +79,6 @@ class BaseTrainer(ABC):
         sample_rate,
         gt_path,
     ):
-
         if not isinstance(actions_dict, dict):
             actions_dict = dict(actions_dict)
 
@@ -100,10 +93,8 @@ class BaseTrainer(ABC):
                 features = np.load(f"{features_path}{vid.split('.')[0]}.npy")[
                     :, ::sample_rate
                 ]
-                input_x = torch.tensor(
-                    features, dtype=torch.float).unsqueeze(0).cuda()
-                predictions = self.model(
-                    input_x, torch.ones(input_x.size()).cuda())
+                input_x = torch.tensor(features, dtype=torch.float).unsqueeze(0).cuda()
+                predictions = self.model(input_x, torch.ones(input_x.size()).cuda())
                 predicted_classes = [
                     list(actions_dict.keys())[
                         list(actions_dict.values()).index(pred.item())
@@ -127,8 +118,9 @@ class BaseTrainer(ABC):
             recog_content = read_file(recog_file).split("\n")[1].split()
 
             total += len(gt_content)
-            correct += sum(1 for gt, recog in zip(gt_content,
-                           recog_content) if gt == recog)
+            correct += sum(
+                1 for gt, recog in zip(gt_content, recog_content) if gt == recog
+            )
 
             edit += edit_score(recog_content, gt_content)
 
