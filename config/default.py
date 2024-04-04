@@ -103,6 +103,7 @@ _C.TRAIN.EXP_NAME = ""
 
 
 def update_config(cfg, args):
+    cfg.defrost()
     # read in config first to figure out the model being used
     cfg.merge_from_file(args.cfg)
     # load defaults to back model in case the yaml does not specify the some defaults

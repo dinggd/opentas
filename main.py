@@ -27,14 +27,10 @@ def get_trainer(cfg):
 
 
 def train(cfg):
+    set_seed(cfg.TRAIN.SEED)
     trainer = get_trainer(cfg)
-    batch_gen = BatchGenerator(
-        cfg.DATA.NUM_CLASSES,
-        cfg.DATA.ACTIONS_DICT,
-        cfg.DATA.GT_PATH,
-        cfg.DATA.FEATURES_PATH,
-        cfg.DATA.SAMPLE_RATE,
-    )
+
+    batch_gen = BatchGenerator(cfg)
     batch_gen.read_data(cfg.DATA.VID_LIST_FILE)
 
     start_time = time.time()
@@ -82,82 +78,80 @@ def eval(cfg):
     np.savetxt(cfg.TRAIN.RES_FILENAME, np.array([scores]), fmt="%1.2f")
 
 
+def extra_train_config(cfg):
+    cfg.DATA.VID_LIST_FILE = (
+        f"{cfg.DATA.PATH}/{cfg.DATA.DATASET}/splits/train.split{cfg.DATA.SPLIT}.bundle"
+    )
+    cfg.DATA.VID_LIST_FILE_TEST = (
+        f"{cfg.DATA.PATH}/{cfg.DATA.DATASET}/splits/test.split{cfg.DATA.SPLIT}.bundle"
+    )
+    cfg.DATA.FEATURES_PATH = f"{cfg.DATA.PATH}/{cfg.DATA.DATASET}/features/"
+    cfg.DATA.GT_PATH = f"{cfg.DATA.PATH}/{cfg.DATA.DATASET}/groundTruth/"
+    cfg.DATA.MAPPING_FILE = f"{cfg.DATA.PATH}/{cfg.DATA.DATASET}/mapping.txt"
+    cfg.DATA.ACTIONS_DICT, cfg.DATA.NUM_CLASSES = read_actions(cfg.DATA.MAPPING_FILE)
+
+    # exp string to indicate the setups, which could be 'standard', 'semi-supervised', etc.
+    # cfg.TRAIN.SETUP = f""
+
+    time_string = datetime.datetime.now().strftime("%m%d-%H-%M-%S-%f")[:-3]
+    cfg.TRAIN.EXP_NAME = (
+        f"{cfg.DATA.DATASET}_{cfg.MODEL.NAME}_{cfg.DATA.SPLIT}_{time_string}"
+    )
+
+    cfg.TRAIN.LOG_DIR = f"exps/{cfg.TRAIN.SETUP}/{cfg.TRAIN.EXP_NAME}"
+
+    if cfg.TRAIN.DEBUG:
+        cfg.TRAIN.LOG_DIR = f"debug/{cfg.TRAIN.LOG_DIR}"
+        cfg.TRAIN.NUM_EPOCHS = 1
+
+    cfg.TRAIN.MODEL_DIR = f"{cfg.TRAIN.LOG_DIR}/models"
+    cfg.TRAIN.RESULT_DIR = f"{cfg.TRAIN.LOG_DIR}/results"
+    os.makedirs(cfg.TRAIN.MODEL_DIR, exist_ok=True)
+    os.makedirs(cfg.TRAIN.RESULT_DIR, exist_ok=True)
+
+    cfg.TRAIN.LOG_FILENAME = f"{cfg.TRAIN.LOG_DIR}/{cfg.TRAIN.EXP_NAME}.log"
+    cfg.TRAIN.RES_FILENAME = f"{cfg.TRAIN.LOG_DIR}/{cfg.TRAIN.EXP_NAME}.txt"
+
+    cfg.TRAIN.CONF_FILENAME = f"{cfg.TRAIN.LOG_DIR}/{cfg.TRAIN.EXP_NAME}.yaml"
+    cfg.freeze()
+    with open(cfg.TRAIN.CONF_FILENAME, "w") as f:
+        f.write(cfg.dump())
+
+
+def logging_config(filename):
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(filename)s] => %(message)s",
+        handlers=[
+            logging.FileHandler(filename=filename),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--cfg", required=True, type=str)
     parser.add_argument("opts", default=None, nargs=argparse.REMAINDER)
     args = parser.parse_args()
-    cfg.defrost()
+
     update_config(cfg, args)
 
     # eval
     if cfg.TRAIN.EVAL:
-        assert (
-            cfg.TRAIN.EXP_NAME != ""
-        ), "Please provide the correct exp_name for evalutaion"
-        exp_name = cfg.TRAIN.EXP_NAME
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s [%(filename)s] => %(message)s",
-            handlers=[
-                logging.FileHandler(filename=cfg.TRAIN.LOG_FILENAME),
-                logging.StreamHandler(sys.stdout),
-            ],
-        )
+
+        logging_config(cfg.TRAIN.LOG_FILENAME)
+
         logging.info(pprint.pformat(args))
         logging.info("-----start  evaluation -----")
-        # logging.info(cfg)
         eval(cfg)
         logging.info("-----end of evaluation -----")
 
     else:  # train
-        cfg.DATA.VID_LIST_FILE = f"{cfg.DATA.PATH}/{cfg.DATA.DATASET}/splits/train.split{cfg.DATA.SPLIT}.bundle"
-        cfg.DATA.VID_LIST_FILE_TEST = f"{cfg.DATA.PATH}/{cfg.DATA.DATASET}/splits/test.split{cfg.DATA.SPLIT}.bundle"
-        cfg.DATA.FEATURES_PATH = f"{cfg.DATA.PATH}/{cfg.DATA.DATASET}/features/"
-        cfg.DATA.GT_PATH = f"{cfg.DATA.PATH}/{cfg.DATA.DATASET}/groundTruth/"
-        cfg.DATA.MAPPING_FILE = f"{cfg.DATA.PATH}/{cfg.DATA.DATASET}/mapping.txt"
-        cfg.DATA.ACTIONS_DICT, cfg.DATA.NUM_CLASSES = read_actions(
-            cfg.DATA.MAPPING_FILE
-        )
+        extra_train_config(cfg)
 
-        # exp string to indicate the setups, which could be 'standard', 'semi-supervised', etc.
-        # cfg.TRAIN.SETUP = f""
-
-        time_string = datetime.datetime.now().strftime("%m%d-%H-%M-%S-%f")[:-3]
-        cfg.TRAIN.EXP_NAME = (
-            f"{cfg.DATA.DATASET}_{cfg.MODEL.NAME}_{cfg.DATA.SPLIT}_{time_string}"
-        )
-
-        cfg.TRAIN.LOG_DIR = f"exps/{cfg.TRAIN.SETUP}/{cfg.TRAIN.EXP_NAME}"
-
-        if cfg.TRAIN.DEBUG:
-            cfg.TRAIN.LOG_DIR = f"debug/{cfg.TRAIN.LOG_DIR}"
-            cfg.TRAIN.NUM_EPOCHS = 1
-
-        cfg.TRAIN.MODEL_DIR = f"{cfg.TRAIN.LOG_DIR}/models"
-        cfg.TRAIN.RESULT_DIR = f"{cfg.TRAIN.LOG_DIR}/results"
-        os.makedirs(cfg.TRAIN.MODEL_DIR, exist_ok=True)
-        os.makedirs(cfg.TRAIN.RESULT_DIR, exist_ok=True)
-
-        cfg.TRAIN.LOG_FILENAME = f"{cfg.TRAIN.LOG_DIR}/{cfg.TRAIN.EXP_NAME}.log"
-        cfg.TRAIN.RES_FILENAME = f"{cfg.TRAIN.LOG_DIR}/{cfg.TRAIN.EXP_NAME}.txt"
-
-        cfg.TRAIN.CONF_FILENAME = f"{cfg.TRAIN.LOG_DIR}/{cfg.TRAIN.EXP_NAME}.yaml"
-        with open(cfg.TRAIN.CONF_FILENAME, "w") as f:
-            f.write(cfg.dump())
-
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s [%(filename)s] => %(message)s",
-            handlers=[
-                logging.FileHandler(filename=cfg.TRAIN.LOG_FILENAME),
-                logging.StreamHandler(sys.stdout),
-            ],
-        )
+        logging_config(cfg.TRAIN.LOG_FILENAME)
 
         logging.info(pprint.pformat(args))
-        # logging.info(cfg)
         logging.info("----- Traning -----")
-        cfg.freeze()
-        set_seed(cfg.TRAIN.SEED)
         train(cfg)
