@@ -886,9 +886,11 @@ class MixedConvAttentionLayer(nn.Module):
 
 
 class DiffusionTrainer(BaseTrainer):
-    def __init__(
-        self, encoder_params, decoder_params, diffusion_params, num_classes, cfg
-    ):
+
+    def __init__(self, cfg):
         self.model = ASDiffusionModel(
-            encoder_params, decoder_params, diffusion_params, num_classes
+            cfg.MODEL.PARAMS.ENCODER_PARAMS,
+            cfg.MODEL.PARAMS.DECODER_PARMS,
+            cfg.MODEL.PARAMS.DIFFUSION_PARAMS,
+            cfg.DATA.NUM_CLASSES,
         )

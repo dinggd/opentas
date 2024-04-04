@@ -1,50 +1,29 @@
-import os
 import argparse
-import logging
-import sys
 import datetime
-import time
+import logging
+import os
 import pprint
-import yaml
-import torch
+import sys
+import time
+
 import numpy as np
+import torch
 
 from batch_gen import BatchGenerator
-from model.mstcn import MSTCNTrainer
+from config import cfg, update_config
 from model.asformer import ASFormerTrainer
 from model.diffusion import DiffusionTrainer
-from utils.misc import seconds_to_hours, set_seed, read_actions
-from config import cfg, update_config
+from model.mstcn import MSTCNTrainer
+from utils.misc import read_actions, seconds_to_hours, set_seed
 
 
 def get_trainer(cfg):
     if cfg.MODEL.NAME == "mstcn":
-        return MSTCNTrainer(
-            cfg.MODEL.PARAMS.NUM_STAGES,
-            cfg.MODEL.PARAMS.NUM_LAYERS,
-            cfg.MODEL.PARAMS.NUM_F_MAPS,
-            cfg.DATA.FEATURE_DIM,
-            cfg.DATA.NUM_CLASSES,
-        )
+        return MSTCNTrainer(cfg)
     elif cfg.MODEL.NAME == "asformer":
-        return ASFormerTrainer(
-            cfg.MODEL.PARAMS.NUM_DECODERS,
-            cfg.MODEL.PARAMS.NUM_LAYERS,
-            cfg.MODEL.PARAMS.R1,
-            cfg.MODEL.PARAMS.R2,
-            cfg.MODEL.PARAMS.NUM_F_MAPS,
-            cfg.DATA.FEATURE_DIM,
-            cfg.DATA.NUM_CLASSES,
-            cfg.MODEL.PARAMS.CHANNEL_MASK_RATE,
-        )
+        return ASFormerTrainer(cfg)
     elif cfg.MODEL.NAME == "diffusion":
-        return DiffusionTrainer(
-            cfg.MODEL.PARAMS.ENCODER_PARAMS,
-            cfg.MODEL.PARAMS.DECODER_PARMS,
-            cfg.MODEL.PARAMS.DIFFUSION_PARAMS,
-            cfg.DATA.NUM_CLASSES,
-            cfg,
-        )
+        return DiffusionTrainer(cfg)
 
 
 def train(cfg):
@@ -126,9 +105,10 @@ if __name__ == "__main__":
             ],
         )
         logging.info(pprint.pformat(args))
-        logging.info("----- evaluation -----")
+        logging.info("-----start  evaluation -----")
         # logging.info(cfg)
         eval(cfg)
+        logging.info("-----end of evaluation -----")
 
     else:  # train
         cfg.DATA.VID_LIST_FILE = f"{cfg.DATA.PATH}/{cfg.DATA.DATASET}/splits/train.split{cfg.DATA.SPLIT}.bundle"
@@ -177,7 +157,7 @@ if __name__ == "__main__":
 
         logging.info(pprint.pformat(args))
         # logging.info(cfg)
-        logging.info("----- traning -----")
+        logging.info("----- Traning -----")
         cfg.freeze()
         set_seed(cfg.TRAIN.SEED)
         train(cfg)

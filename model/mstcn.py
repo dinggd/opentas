@@ -67,13 +67,18 @@ class DilatedResidualLayer(nn.Module):
 
 
 class MSTCNTrainer(BaseTrainer):
-    def __init__(self, num_blocks, num_layers, num_f_maps, dim, num_classes):
+    def __init__(self, cfg):
+
         self.model = MultiStageModel(
-            num_blocks, num_layers, num_f_maps, dim, num_classes
+            cfg.MODEL.PARAMS.NUM_STAGES,
+            cfg.MODEL.PARAMS.NUM_LAYERS,
+            cfg.MODEL.PARAMS.NUM_F_MAPS,
+            cfg.DATA.FEATURE_DIM,
+            cfg.DATA.NUM_CLASSES,
         )
         self.ce = nn.CrossEntropyLoss(ignore_index=-100)
         self.mse = nn.MSELoss(reduction="none")
-        self.num_classes = num_classes
+        self.num_classes = (cfg.DATA.NUM_CLASSES,)
 
     # Override
     def get_optimizers(self, learning_rate):
