@@ -1,10 +1,11 @@
-from tqdm import tqdm
 import logging
 from abc import ABC
-import torch
-import numpy as np
 
-from eval import read_file, edit_score, f_score
+import numpy as np
+import torch
+from tqdm import tqdm
+
+from eval import edit_score, f_score, read_file
 
 
 class BaseTrainer(ABC):
