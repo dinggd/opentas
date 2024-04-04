@@ -7,7 +7,7 @@ import time as Time
 import torch.nn as nn
 import torch.nn.functional as F
 from scipy.ndimage import gaussian_filter1d
-from base import BaseTrainer
+from model.base import BaseTrainer
 
 ########################################################################################
 
