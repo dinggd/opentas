@@ -1,0 +1,18 @@
+DATA:
+  PATH: "/home/dinggd/datasets"
+  DATASET: "breakfast"
+  SAMPLE_RATE: 1
+  FEATURE_DIM: 2048
+  SPLIT: 1
+
+MODEL:
+  NAME: "mstcn"
+  PARAMS:
+    NUM_STAGES: 4
+    NUM_LAYERS: 10
+    NUM_F_MAPS: 64
+
+TRAIN:
+  BZ: 8
+  LR: 0.0005
+  NUM_EPOCHS: 50

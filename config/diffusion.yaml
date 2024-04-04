@@ -1,0 +1,14 @@
+DATA:
+  PATH: "/home/dinggd/datasets"
+  DATASET: "breakfast"
+  SAMPLE_RATE: 1
+  FEATURE_DIM: 2048
+  SPLIT: 1
+
+MODEL:
+  NAME: "diffusion"
+
+TRAIN:
+  BZ: 8
+  LR: 0.0005
+  NUM_EPOCHS: 50
