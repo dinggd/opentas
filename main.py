@@ -14,6 +14,7 @@ from config import cfg, update_config
 from model.asformer import ASFormerTrainer
 from model.diffusion import DiffusionTrainer
 from model.mstcn import MSTCNTrainer
+from model.c2f import C2FTrainer
 from utils.misc import read_actions, seconds_to_hours, set_seed
 
 
@@ -24,6 +25,8 @@ def get_trainer(cfg):
         return ASFormerTrainer(cfg)
     elif cfg.MODEL.NAME == "diffusion":
         return DiffusionTrainer(cfg)
+    elif cfg.MODEL.NAME == "c2f":
+        return C2FTrainer(cfg)
 
 
 def train(cfg):
@@ -33,19 +36,17 @@ def train(cfg):
     batch_gen = BatchGenerator(cfg)
     batch_gen.read_data(cfg.DATA.VID_LIST_FILE)
 
+    logging.info(f"------ Training ---------")
     start_time = time.time()
     logging.info(f"Starting time: {start_time}")
     trainer.train(batch_gen, cfg)
 
-    logging.info("Evaluation:")
+    logging.info("------ Evaluation ---------")
     scores = trainer.predict(cfg)
-
     logging.info(f"{scores}")
-    logging.info("End of evaluation.")
 
     end_time = time.time()
     logging.info(f"Ending time: {end_time}")
-    np.savetxt(cfg.TRAIN.RES_FILENAME, np.array([scores]), fmt="%1.2f")
 
     cost_time = end_time - start_time
     hrs, mins, secs = seconds_to_hours(cost_time)
@@ -57,9 +58,10 @@ def eval(cfg):
     trainer.model.load_state_dict(
         torch.load(f"{cfg.TRAIN.MODEL_DIR}/epoch-{cfg.TRAIN.NUM_EPOCHS}.model")
     )
+
+    logging.info("------ Evaluation ---------")
     scores = trainer.predict(cfg)
     logging.info(f"{scores}")
-    np.savetxt(cfg.TRAIN.RES_FILENAME, np.array([scores]), fmt="%1.2f")
 
 
 def extra_train_config(cfg):
@@ -95,8 +97,7 @@ def extra_train_config(cfg):
 
     cfg.TRAIN.LOG_FILENAME = f"{cfg.TRAIN.LOG_DIR}/{cfg.TRAIN.EXP_NAME}.log"
     cfg.TRAIN.RES_FILENAME = f"{cfg.TRAIN.LOG_DIR}/{cfg.TRAIN.EXP_NAME}.txt"
-
-    cfg.TRAIN.CONF_FILENAME = f"{cfg.TRAIN.LOG_DIR}/{cfg.TRAIN.EXP_NAME}.yaml"
+    cfg.TRAIN.CFG_FILENAME = f"{cfg.TRAIN.LOG_DIR}/{cfg.TRAIN.EXP_NAME}.yaml"
     cfg.freeze()
     with open(cfg.TRAIN.CONF_FILENAME, "w") as f:
         f.write(cfg.dump())
@@ -123,13 +124,11 @@ if __name__ == "__main__":
 
     # eval
     if cfg.TRAIN.EVAL:
-
         log_redirect(cfg.TRAIN.LOG_FILENAME)
 
         logging.info(pprint.pformat(args))
-        logging.info("-----start  evaluation -----")
+
         eval(cfg)
-        logging.info("-----end of evaluation -----")
 
     else:  # train
         if not cfg.TRAIN.RESUME:
@@ -138,5 +137,5 @@ if __name__ == "__main__":
         log_redirect(cfg.TRAIN.LOG_FILENAME)
 
         logging.info(pprint.pformat(args))
-        logging.info("----- Traning -----")
+
         train(cfg)
