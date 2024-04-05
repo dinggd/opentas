@@ -39,10 +39,6 @@ class BaseTrainer(ABC):
                 torch.load(os.path.join(cfg.TRAIN.MODEL_DIR, f"epoch-{last_epoch}.opt"))
             )
 
-        logging.info(
-            f"Training from {last_epoch} epoch to {cfg.TRAIN.NUM_EPOCHS} epoch:"
-        )
-
         for epoch in tqdm(range(last_epoch, cfg.TRAIN.NUM_EPOCHS)):
             epoch_loss = 0
             correct = 0
@@ -173,5 +169,5 @@ class BaseTrainer(ABC):
 
             f1 = np.nan_to_num(f1) * 100
             final.append(f1)
-
+        np.savetxt(cfg.TRAIN.RES_FILENAME, np.array([final]), fmt="%1.2f")
         return final
