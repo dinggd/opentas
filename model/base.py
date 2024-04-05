@@ -76,19 +76,22 @@ class BaseTrainer(ABC):
                 scheduler.step(epoch_loss)
             batch_gen.reset()
 
-        torch.save(
-            self.model.state_dict(), f"{cfg.TRAIN.MODEL_DIR}/epoch-{epoch + 1}.model"
-        )
-        torch.save(
-            optimizer.state_dict(), f"{cfg.TRAIN.MODEL_DIR}/epoch-{epoch + 1}.opt"
-        )
-        logging.info(
-            "[epoch %d]: epoch loss = %f,   acc = %f"
-            % (
-                epoch + 1,
-                epoch_loss / len(batch_gen.list_of_examples),
-                float(correct) / total,
+            logging.info(
+                "[epoch %d]: epoch loss = %f,   acc = %f"
+                % (
+                    epoch + 1,
+                    epoch_loss / len(batch_gen.list_of_examples),
+                    float(correct) / total,
+                )
             )
+
+        torch.save(
+            self.model.state_dict(),
+            f"{cfg.TRAIN.MODEL_DIR}/epoch-{cfg.TRAIN.NUM_EPOCHS}.model",
+        )
+        torch.save(
+            optimizers[-1].state_dict(),
+            f"{cfg.TRAIN.MODEL_DIR}/epoch-{cfg.TRAIN.NUM_EPOCHS}.opt",
         )
 
     def get_optimizers(self, learning_rate):
@@ -100,29 +103,25 @@ class BaseTrainer(ABC):
     def calc_loss(self, predictions, batch_target, mask):
         raise NotImplementedError()
 
-    def predict(
-        self,
-        results_dir,
-        features_path,
-        vid_list_file,
-        actions_dict,
-        sample_rate,
-        gt_path,
-    ):
-        if not isinstance(actions_dict, dict):
-            actions_dict = dict(actions_dict)
+    def predict(self, cfg):
+        cfg.DATA.FEATURES_PATH,
+        cfg.DATA.VID_LIST_FILE_TEST,
+        cfg.DATA.ACTIONS_DICT,
+        cfg.DATA.SAMPLE_RATE,
+        cfg.DATA.GT_PATH,
+        if not isinstance(cfg.DATA.ACTIONS_DICT, dict):
+            actions_dict = dict(cfg.DATA.ACTIONS_DICT)
 
-        with open(vid_list_file, "r") as f:
+        with open(cfg.DATA.VID_LIST_FILE_TEST, "r") as f:
             list_of_vids = f.read().splitlines()
 
         self.model.eval()
         with torch.no_grad():
             self.model.cuda()
-
             for vid in list_of_vids:
-                features = np.load(f"{features_path}{vid.split('.')[0]}.npy")[
-                    :, ::sample_rate
-                ]
+                features = np.load(
+                    os.path.join(cfg.DATA.FEATURES_PATH, f"{vid.split('.')[0]}.npy")
+                )[:, :: cfg.DATA.SAMPLE_RATE]
                 input_x = torch.tensor(features, dtype=torch.float).unsqueeze(0).cuda()
                 predictions = self.model(input_x, torch.ones(input_x.size()).cuda())
                 predicted_classes = [
@@ -130,9 +129,9 @@ class BaseTrainer(ABC):
                         list(actions_dict.values()).index(pred.item())
                     ]
                     for pred in torch.max(predictions[-1].data, 1)[1].squeeze()
-                ] * sample_rate
+                ] * cfg.DATA.SAMPLE_RATE
                 f_name = vid.split("/")[-1].split(".")[0]
-                with open(f"{results_dir}/{f_name}", "w") as f:
+                with open(f"{cfg.TRAIN.RESULT_DIR}/{f_name}", "w") as f:
                     f.write("### Frame level recognition: ###\n")
                     f.write(" ".join(predicted_classes))
 
@@ -142,9 +141,9 @@ class BaseTrainer(ABC):
         correct, total, edit = 0, 0, 0
 
         for vid in list_of_vids:
-            gt_file = gt_path + vid
+            gt_file = cfg.DATA.GT_PATH + vid
             gt_content = read_file(gt_file).split("\n")[0:-1]
-            recog_file = results_dir + "/" + vid.split(".")[0]
+            recog_file = os.path.join(cfg.TRAIN.RESULT_DIR, vid.split(".")[0])
             recog_content = read_file(recog_file).split("\n")[1].split()
 
             total += len(gt_content)

@@ -38,14 +38,7 @@ def train(cfg):
     trainer.train(batch_gen, cfg)
 
     logging.info("Evaluation:")
-    scores = trainer.predict(
-        cfg.TRAIN.RESULT_DIR,
-        cfg.DATA.FEATURES_PATH,
-        cfg.DATA.VID_LIST_FILE_TEST,
-        cfg.DATA.ACTIONS_DICT,
-        cfg.DATA.SAMPLE_RATE,
-        cfg.DATA.GT_PATH,
-    )
+    scores = trainer.predict(cfg)
 
     logging.info(f"{scores}")
     logging.info("End of evaluation.")
@@ -64,14 +57,7 @@ def eval(cfg):
     trainer.model.load_state_dict(
         torch.load(f"{cfg.TRAIN.MODEL_DIR}/epoch-{cfg.TRAIN.NUM_EPOCHS}.model")
     )
-    scores = trainer.predict(
-        cfg.TRAIN.RESULT_DIR,
-        cfg.DATA.FEATURES_PATH,
-        cfg.DATA.VID_LIST_FILE_TEST,
-        cfg.DATA.ACTIONS_DICT,
-        cfg.DATA.SAMPLE_RATE,
-        cfg.DATA.GT_PATH,
-    )
+    scores = trainer.predict(cfg)
     logging.info(f"{scores}")
     np.savetxt(cfg.TRAIN.RES_FILENAME, np.array([scores]), fmt="%1.2f")
 
@@ -116,7 +102,7 @@ def extra_train_config(cfg):
         f.write(cfg.dump())
 
 
-def logging_config(filename):
+def log_redirect(filename):
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(filename)s] => %(message)s",
@@ -138,7 +124,7 @@ if __name__ == "__main__":
     # eval
     if cfg.TRAIN.EVAL:
 
-        logging_config(cfg.TRAIN.LOG_FILENAME)
+        log_redirect(cfg.TRAIN.LOG_FILENAME)
 
         logging.info(pprint.pformat(args))
         logging.info("-----start  evaluation -----")
@@ -149,7 +135,7 @@ if __name__ == "__main__":
         if not cfg.TRAIN.RESUME:
             extra_train_config(cfg)
 
-        logging_config(cfg.TRAIN.LOG_FILENAME)
+        log_redirect(cfg.TRAIN.LOG_FILENAME)
 
         logging.info(pprint.pformat(args))
         logging.info("----- Traning -----")
