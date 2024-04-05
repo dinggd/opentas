@@ -75,15 +75,17 @@ class BaseTrainer(ABC):
             for scheduler in schedulers:
                 scheduler.step(epoch_loss)
             batch_gen.reset()
-
-            logging.info(
-                "[epoch %d]: epoch loss = %f,   acc = %f"
-                % (
-                    epoch + 1,
-                    epoch_loss / len(batch_gen.list_of_examples),
-                    float(correct) / total,
+            if (epoch + 1) % cfg.TRAIN.LOG_FREQ == 0 or (
+                epoch + 1
+            ) == cfg.TRAIN.NUM_EPOCHS:
+                logging.info(
+                    "[epoch %d]: epoch loss = %f,   acc = %f"
+                    % (
+                        epoch + 1,
+                        epoch_loss / len(batch_gen.list_of_examples),
+                        float(correct) / total,
+                    )
                 )
-            )
 
         torch.save(
             self.model.state_dict(),
