@@ -78,7 +78,7 @@ class MSTCNTrainer(BaseTrainer):
         )
         self.ce = nn.CrossEntropyLoss(ignore_index=-100)
         self.mse = nn.MSELoss(reduction="none")
-        self.num_classes = (cfg.DATA.NUM_CLASSES,)
+        self.num_classes = cfg.DATA.NUM_CLASSES
 
     # Override
     def get_optimizers(self, learning_rate):

@@ -13,7 +13,7 @@ class BatchGenerator(object):
         self.num_classes = cfg.DATA.NUM_CLASSES
         self.actions_dict = (
             dict(cfg.DATA.ACTIONS_DICT)
-            if not isinstance(cfg.DATA.ACTIONS_DICT)
+            if not isinstance(cfg.DATA.ACTIONS_DICT, dict)
             else cfg.DATA.ACTIONS_DICT
         )
         self.gt_path = cfg.DATA.GT_PATH
