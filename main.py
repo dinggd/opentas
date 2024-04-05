@@ -35,9 +35,7 @@ def train(cfg):
 
     start_time = time.time()
     logging.info(f"Starting time: {start_time}")
-    trainer.train(
-        batch_gen, cfg.TRAIN.MODEL_DIR, cfg.TRAIN.NUM_EPOCHS, cfg.TRAIN.BZ, cfg.TRAIN.LR
-    )
+    trainer.train(batch_gen, cfg)
 
     logging.info("Evaluation:")
     scores = trainer.predict(
@@ -148,7 +146,8 @@ if __name__ == "__main__":
         logging.info("-----end of evaluation -----")
 
     else:  # train
-        extra_train_config(cfg)
+        if not cfg.TRAIN.RESUME:
+            extra_train_config(cfg)
 
         logging_config(cfg.TRAIN.LOG_FILENAME)
 

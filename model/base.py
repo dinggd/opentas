@@ -1,29 +1,54 @@
 import logging
 from abc import ABC
-
+import os
 import numpy as np
 import torch
 from tqdm import tqdm
-
+import re
 from eval import edit_score, f_score, read_file
 
 
 class BaseTrainer(ABC):
     """NOTE: All concrete classes of this must initialize self.model and self.num_classes"""
 
-    def train(self, batch_gen, save_dir, num_epochs, batch_size, learning_rate):
+    def train(self, batch_gen, cfg):
         self.model.train()
         self.model.cuda()
 
-        optimizers = self.get_optimizers(learning_rate)
+        optimizers = self.get_optimizers(cfg.TRAIN.LR)
         schedulers = self.get_schedulers(optimizers)
 
-        for epoch in tqdm(range(num_epochs)):
+        last_epoch = 0
+        # check is resume training is enabled
+        if cfg.TRAIN.RESUME:
+            # find epoch provided if not find the last available
+            for filename in os.listdir(cfg.TRAIN.MODEL_DIR):
+                if filename.endswith("model"):
+                    match = re.search(r"\d+", filename)
+                    if match:
+                        number = int(match.group())
+                        if f"epoch-{number}.opt" in os.listdir(cfg.TRAIN.MODEL_DIR):
+                            last_epoch = number if number > last_epoch else last_epoch
+            logging.info(f"-------- Loaded {last_epoch}-th epoch model ---------")
+            self.model.load_state_dict(
+                torch.load(
+                    os.path.join(cfg.TRAIN.MODEL_DIR, f"epoch-{last_epoch}.model")
+                )
+            )
+            optimizers[-1].load_state_dict(
+                torch.load(os.path.join(cfg.TRAIN.MODEL_DIR, f"epoch-{last_epoch}.opt"))
+            )
+
+        logging.info(
+            f"Training from {last_epoch} epoch to {cfg.TRAIN.NUM_EPOCHS} epoch:"
+        )
+
+        for epoch in tqdm(range(last_epoch, cfg.TRAIN.NUM_EPOCHS)):
             epoch_loss = 0
             correct = 0
             total = 0
             while batch_gen.has_next():
-                batch_input, batch_target, mask = batch_gen.next_batch(batch_size)
+                batch_input, batch_target, mask = batch_gen.next_batch(cfg.TRAIN.BZ)
                 batch_input, batch_target, mask = (
                     batch_input.cuda(),
                     batch_target.cuda(),
@@ -51,8 +76,12 @@ class BaseTrainer(ABC):
                 scheduler.step(epoch_loss)
             batch_gen.reset()
 
-        torch.save(self.model.state_dict(), f"{save_dir}/epoch-{epoch + 1}.model")
-        torch.save(optimizer.state_dict(), f"{save_dir}/epoch-{epoch + 1}.opt")
+        torch.save(
+            self.model.state_dict(), f"{cfg.TRAIN.MODEL_DIR}/epoch-{epoch + 1}.model"
+        )
+        torch.save(
+            optimizer.state_dict(), f"{cfg.TRAIN.MODEL_DIR}/epoch-{epoch + 1}.opt"
+        )
         logging.info(
             "[epoch %d]: epoch loss = %f,   acc = %f"
             % (
