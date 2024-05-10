@@ -12,7 +12,6 @@ import torch
 from batch_gen import BatchGenerator
 from config import cfg, update_config
 from model.asformer import ASFormerTrainer
-from model.diffusion import DiffusionTrainer
 from model.mstcn import MSTCNTrainer
 from model.c2f import C2FTrainer
 from utils.misc import read_actions, seconds_to_hours, set_seed
@@ -23,8 +22,6 @@ def get_trainer(cfg):
         return MSTCNTrainer(cfg)
     elif cfg.MODEL.NAME == "asformer":
         return ASFormerTrainer(cfg)
-    elif cfg.MODEL.NAME == "diffusion":
-        return DiffusionTrainer(cfg)
     elif cfg.MODEL.NAME == "c2f":
         return C2FTrainer(cfg)
 

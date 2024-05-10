@@ -27,7 +27,11 @@ class BaseTrainer(ABC):
                     match = re.search(r"\d+", filename)
                     if match:
                         number = int(match.group())
-                        if f"epoch-{number}.opt" in os.listdir(cfg.TRAIN.MODEL_DIR):
+                        # Ensure that optimizers are also saved for this epoch
+                        if np.all([
+                            f"epoch-{number}-opt{opt_idx}.opt" in os.listdir(cfg.TRAIN.MODEL_DIR) 
+                            for opt_idx in range(len(optimizers))
+                        ]): 
                             last_epoch = number if number > last_epoch else last_epoch
             logging.info(f"-------- Loaded {last_epoch}-th epoch model ---------")
             self.model.load_state_dict(
@@ -35,14 +39,16 @@ class BaseTrainer(ABC):
                     os.path.join(cfg.TRAIN.MODEL_DIR, f"epoch-{last_epoch}.model")
                 )
             )
-            optimizers[-1].load_state_dict(
-                torch.load(os.path.join(cfg.TRAIN.MODEL_DIR, f"epoch-{last_epoch}.opt"))
-            )
+            for opt_idx in range(len(optimizers)):
+                optimizers[opt_idx].load_state_dict(
+                    torch.load(os.path.join(cfg.TRAIN.MODEL_DIR, f"epoch-{last_epoch}-opt{opt_idx}.opt"))
+                )
 
         for epoch in tqdm(range(last_epoch, cfg.TRAIN.NUM_EPOCHS)):
             epoch_loss = 0
             correct = 0
             total = 0
+
             while batch_gen.has_next():
                 batch_input, batch_target, mask = batch_gen.next_batch(cfg.TRAIN.BZ)
                 batch_input, batch_target, mask = (
@@ -50,7 +56,8 @@ class BaseTrainer(ABC):
                     batch_target.cuda(),
                     mask.cuda(),
                 )
-                predictions = self.model(batch_input, mask)
+                
+                predictions = self.forward_train(batch_input, mask)
 
                 loss = self.calc_loss(predictions, batch_target, mask)
 
@@ -70,10 +77,13 @@ class BaseTrainer(ABC):
 
             for scheduler in schedulers:
                 scheduler.step(epoch_loss)
+
             batch_gen.reset()
-            if (epoch + 1) % cfg.TRAIN.LOG_FREQ == 0 or (
-                epoch + 1
-            ) == cfg.TRAIN.NUM_EPOCHS:
+
+            if (
+                (epoch + 1) % cfg.TRAIN.LOG_FREQ == 0
+                or (epoch + 1) == cfg.TRAIN.NUM_EPOCHS
+            ):
                 logging.info(
                     "[epoch %d]: epoch loss = %f,   acc = %f"
                     % (
@@ -87,19 +97,11 @@ class BaseTrainer(ABC):
             self.model.state_dict(),
             f"{cfg.TRAIN.MODEL_DIR}/epoch-{cfg.TRAIN.NUM_EPOCHS}.model",
         )
-        torch.save(
-            optimizers[-1].state_dict(),
-            f"{cfg.TRAIN.MODEL_DIR}/epoch-{cfg.TRAIN.NUM_EPOCHS}.opt",
-        )
-
-    def get_optimizers(self, learning_rate):
-        raise NotImplementedError()
-
-    def get_schedulers(self, optimizers):
-        raise NotImplementedError()
-
-    def calc_loss(self, predictions, batch_target, mask):
-        raise NotImplementedError()
+        for opt_idx in range(len(optimizers)):
+            torch.save(
+                optimizers[opt_idx].state_dict(),
+                f"{cfg.TRAIN.MODEL_DIR}/epoch-{cfg.TRAIN.NUM_EPOCHS}-opt{opt_idx}.opt",
+            )
 
     def predict(self, cfg):
         cfg.DATA.FEATURES_PATH,
@@ -116,18 +118,21 @@ class BaseTrainer(ABC):
         self.model.eval()
         with torch.no_grad():
             self.model.cuda()
+
             for vid in list_of_vids:
                 features = np.load(
                     os.path.join(cfg.DATA.FEATURES_PATH, f"{vid.split('.')[0]}.npy")
                 )[:, :: cfg.DATA.SAMPLE_RATE]
                 input_x = torch.tensor(features, dtype=torch.float).unsqueeze(0).cuda()
-                predictions = self.model(input_x, torch.ones(input_x.size()).cuda())
+
+                predictions = self.forward_eval(input_x, torch.ones(input_x.size()).cuda())
                 predicted_classes = [
                     list(actions_dict.keys())[
                         list(actions_dict.values()).index(pred.item())
                     ]
                     for pred in torch.max(predictions[-1].data, 1)[1].squeeze()
                 ] * cfg.DATA.SAMPLE_RATE
+
                 f_name = vid.split("/")[-1].split(".")[0]
                 with open(f"{cfg.TRAIN.RESULT_DIR}/{f_name}", "w") as f:
                     f.write("### Frame level recognition: ###\n")
@@ -171,3 +176,23 @@ class BaseTrainer(ABC):
             final.append(f1)
         np.savetxt(cfg.TRAIN.RES_FILENAME, np.array([final]), fmt="%1.2f")
         return final
+
+    def get_optimizers(self, learning_rate):
+        """Hook method. Define the optimizers to use for training."""
+        raise NotImplementedError()
+
+    def get_schedulers(self, optimizers):
+        """Hook method. Define LR schedulers to use for training."""
+        raise NotImplementedError()
+
+    def calc_loss(self, predictions, batch_target, mask):
+        """Hook method. Calculates the loss between the target and predicted values."""
+        raise NotImplementedError()
+
+    def forward_train(self, *args, **kwargs):
+        """Overridable hook method. Indicate forward propagation method to use for training."""
+        return self.model(*args, **kwargs)
+
+    def forward_eval(self, *args, **kwargs):
+        """Overridable hook method. Indicate forward propagation method to use for evaluation."""
+        return self.model(*args, **kwargs)
