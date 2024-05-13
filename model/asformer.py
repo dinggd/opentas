@@ -546,7 +546,9 @@ class MyTransformer(nn.Module):
 
 
 class ASFormerTrainer(BaseTrainer):
-    def __init__(self, cfg):
+
+    # Override
+    def init_model(self, cfg):
         self.model = MyTransformer(
             cfg.MODEL.PARAMS.NUM_DECODERS,
             cfg.MODEL.PARAMS.NUM_LAYERS,
@@ -557,22 +559,27 @@ class ASFormerTrainer(BaseTrainer):
             cfg.DATA.NUM_CLASSES,
             cfg.MODEL.PARAMS.CHANNEL_MASK_RATE,
         )
+
+    # Override
+    def init_criterion(self, cfg):
         self.ce = nn.CrossEntropyLoss(ignore_index=-100)
         self.mse = nn.MSELoss(reduction="none")
-        self.num_classes = cfg.DATA.NUM_CLASSES
 
-    def get_optimizers(self, learning_rate):
-        return [optim.Adam(self.model.parameters(), lr=learning_rate)]
+    # Override
+    def get_optimizers(self, cfg):
+        return [optim.Adam(self.model.parameters(), lr=cfg.TRAIN.LR)]
 
-    def get_schedulers(self, optimizers):
+    # Override
+    def get_schedulers(self, optimizers, cfg):
         optimizer = optimizers[0]  # Only one optmizer for ASFormer
         return [
             optim.lr_scheduler.ReduceLROnPlateau(
                 optimizer, mode="min", factor=0.5, patience=3, verbose=True
             )
         ]
-
-    def get_train_loss_preds(self, batch_train_data):
+    
+    # Override
+    def get_train_loss_preds(self, batch_train_data, cfg):
 
         # Unpack
         batch_input, batch_target, mask = batch_train_data
@@ -583,7 +590,7 @@ class ASFormerTrainer(BaseTrainer):
         loss = 0
         for p in predictions:
             loss += self.ce(
-                p.transpose(2, 1).contiguous().view(-1, self.num_classes),
+                p.transpose(2, 1).contiguous().view(-1, cfg.DATA.NUM_CLASSES),
                 batch_target.view(-1),
             )
             loss += 0.15 * torch.mean(

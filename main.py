@@ -36,10 +36,10 @@ def train(cfg):
     logging.info(f"------ Training ---------")
     start_time = time.time()
     logging.info(f"Starting time: {start_time}")
-    trainer.train(batch_gen, cfg)
+    trainer.train(batch_gen)
 
     logging.info("------ Evaluation ---------")
-    scores = trainer.predict(cfg)
+    scores = trainer.predict()
     logging.info(f"{scores}")
 
     end_time = time.time()
@@ -57,7 +57,7 @@ def eval(cfg):
     )
 
     logging.info("------ Evaluation ---------")
-    scores = trainer.predict(cfg)
+    scores = trainer.predict()
     logging.info(f"{scores}")
 
 

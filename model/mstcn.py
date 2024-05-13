@@ -67,29 +67,32 @@ class DilatedResidualLayer(nn.Module):
 
 
 class MSTCNTrainer(BaseTrainer):
-    def __init__(self, cfg):
 
+    # Override
+    def init_model(self, cfg):
         self.model = MultiStageModel(
             cfg.MODEL.PARAMS.NUM_STAGES,
             cfg.MODEL.PARAMS.NUM_LAYERS,
             cfg.MODEL.PARAMS.NUM_F_MAPS,
             cfg.DATA.FEATURE_DIM,
             cfg.DATA.NUM_CLASSES,
-        )
+        )       
+
+    # Override
+    def init_criterion(self, cfg):
         self.ce = nn.CrossEntropyLoss(ignore_index=-100)
         self.mse = nn.MSELoss(reduction="none")
-        self.num_classes = cfg.DATA.NUM_CLASSES
 
     # Override
-    def get_optimizers(self, learning_rate):
-        return [optim.Adam(self.model.parameters(), lr=learning_rate)]
+    def get_optimizers(self, cfg):
+        return [optim.Adam(self.model.parameters(), lr=cfg.TRAIN.LR)]
 
     # Override
-    def get_schedulers(self, optimizers):
+    def get_schedulers(self, optimizers, cfg):
         return []
 
     # Override
-    def get_train_loss_preds(self, batch_train_data):
+    def get_train_loss_preds(self, batch_train_data, cfg):
 
         # Unpack
         batch_input, batch_target, mask = batch_train_data
@@ -101,7 +104,7 @@ class MSTCNTrainer(BaseTrainer):
         loss = 0
         for i, p in enumerate(predictions):
             loss += self.ce(
-                p.transpose(2, 1).contiguous().view(-1, self.num_classes),
+                p.transpose(2, 1).contiguous().view(-1, cfg.DATA.NUM_CLASSES),
                 batch_target.view(-1),
             )
             loss += 0.15 * torch.mean(
