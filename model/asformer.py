@@ -572,15 +572,21 @@ class ASFormerTrainer(BaseTrainer):
             )
         ]
 
-    def calc_loss(self, predictions, batch_target, mask):
+    def get_train_loss_preds(self, batch_train_data):
+
+        # Unpack
+        batch_input, batch_target, mask = batch_train_data
+
+        # Forward pass
+        predictions = self.model(batch_input, mask)
+
         loss = 0
         for p in predictions:
             loss += self.ce(
                 p.transpose(2, 1).contiguous().view(-1, self.num_classes),
                 batch_target.view(-1),
             )
-            # NOTE: ASFormer paper claims to have used 0.25 weighting instead of 0.15
-            loss += 0.25 * torch.mean(
+            loss += 0.15 * torch.mean(
                 torch.clamp(
                     self.mse(
                         F.log_softmax(p[:, :, 1:], dim=1),
@@ -591,4 +597,17 @@ class ASFormerTrainer(BaseTrainer):
                 )
                 * mask[:, :, 1:]
             )
-        return loss
+        return loss, predictions
+    
+    # Override
+    def get_eval_preds(self, test_input, actions_dict, cfg):
+
+        predictions = self.model(test_input, torch.ones(test_input.size()).cuda())
+        predicted_classes = [
+            list(actions_dict.keys())[
+                list(actions_dict.values()).index(pred.item())
+            ]
+            for pred in torch.max(predictions[-1].data, 1)[1].squeeze()
+        ] * cfg.DATA.SAMPLE_RATE
+
+        return predicted_classes

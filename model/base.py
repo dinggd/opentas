@@ -56,10 +56,8 @@ class BaseTrainer(ABC):
                     batch_target.cuda(),
                     mask.cuda(),
                 )
-                
-                predictions = self.forward_train(batch_input, mask)
 
-                loss = self.calc_loss(predictions, batch_target, mask)
+                loss, predictions = self.get_train_loss_preds((batch_input, batch_target, mask))
 
                 epoch_loss += loss.item()
 
@@ -125,13 +123,7 @@ class BaseTrainer(ABC):
                 )[:, :: cfg.DATA.SAMPLE_RATE]
                 input_x = torch.tensor(features, dtype=torch.float).unsqueeze(0).cuda()
 
-                predictions = self.forward_eval(input_x, torch.ones(input_x.size()).cuda())
-                predicted_classes = [
-                    list(actions_dict.keys())[
-                        list(actions_dict.values()).index(pred.item())
-                    ]
-                    for pred in torch.max(predictions[-1].data, 1)[1].squeeze()
-                ] * cfg.DATA.SAMPLE_RATE
+                predicted_classes = self.get_eval_preds(input_x, actions_dict, cfg)
 
                 f_name = vid.split("/")[-1].split(".")[0]
                 with open(f"{cfg.TRAIN.RESULT_DIR}/{f_name}", "w") as f:
@@ -174,25 +166,43 @@ class BaseTrainer(ABC):
 
             f1 = np.nan_to_num(f1) * 100
             final.append(f1)
+            
         np.savetxt(cfg.TRAIN.RES_FILENAME, np.array([final]), fmt="%1.2f")
         return final
+    
 
     def get_optimizers(self, learning_rate):
         """Hook method. Define the optimizers to use for training."""
         raise NotImplementedError()
+    
 
     def get_schedulers(self, optimizers):
         """Hook method. Define LR schedulers to use for training."""
         raise NotImplementedError()
+    
+    
+    def get_train_loss_preds(self, batch_train_data):
+        """Hook method. Defines model's training protocol.
+        
+        Args:
+        - `batch_train_data`: A batch of training data from the dataset
 
-    def calc_loss(self, predictions, batch_target, mask):
-        """Hook method. Calculates the loss between the target and predicted values."""
+        Returns:
+        A Tuple containing:
+        - `loss`: The training loss for this batch
+        - `predictions`: The predictions from this batch
+        """
         raise NotImplementedError()
+    
+    
+    def get_eval_preds(self, test_input, actions_dict, cfg):
+        """Hook method. Defines model's evaluation protocol.
+        
+        Args:
+        - `test_input`: The test sample
+        - `actions_dict`: The dictionary of action indices to labels
 
-    def forward_train(self, *args, **kwargs):
-        """Overridable hook method. Indicate forward propagation method to use for training."""
-        return self.model(*args, **kwargs)
-
-    def forward_eval(self, *args, **kwargs):
-        """Overridable hook method. Indicate forward propagation method to use for evaluation."""
-        return self.model(*args, **kwargs)
+        Returns:
+        A List `predicted_classes` containing the frame-wise label predictions for each frame in the test sample
+        """
+        raise NotImplementedError()

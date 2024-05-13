@@ -89,7 +89,14 @@ class MSTCNTrainer(BaseTrainer):
         return []
 
     # Override
-    def calc_loss(self, predictions, batch_target, mask):
+    def get_train_loss_preds(self, batch_train_data):
+
+        # Unpack
+        batch_input, batch_target, mask = batch_train_data
+
+        # Forward pass
+        predictions = self.model(batch_input, mask)
+
         # predictions_old is for LwF
         loss = 0
         for i, p in enumerate(predictions):
@@ -108,4 +115,17 @@ class MSTCNTrainer(BaseTrainer):
                 )
                 * mask[:, :, 1:]
             )
-        return loss
+        return loss, predictions
+        
+    # Override
+    def get_eval_preds(self, test_input, actions_dict, cfg):
+
+        predictions = self.model(test_input, torch.ones(test_input.size()).cuda())
+        predicted_classes = [
+            list(actions_dict.keys())[
+                list(actions_dict.values()).index(pred.item())
+            ]
+            for pred in torch.max(predictions[-1].data, 1)[1].squeeze()
+        ] * cfg.DATA.SAMPLE_RATE
+
+        return predicted_classes
