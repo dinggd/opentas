@@ -9,22 +9,28 @@ import time
 import numpy as np
 import torch
 
-from batch_gen import BatchGenerator
+from dataset.batch_gen import BatchGenerator
 from config import cfg, update_config
 from model.asformer import ASFormerTrainer
-from model.diffusion import DiffusionTrainer
 from model.mstcn import MSTCNTrainer
 from model.c2f import C2FTrainer
 from utils.misc import read_actions, seconds_to_hours, set_seed
 
+
+def get_train_dataset_loader(cfg):
+    if cfg.MODEL.NAME == "diffact":
+        raise NotImplementedError
+    else:
+        batch_gen = BatchGenerator(cfg)
+        batch_gen.read_data(cfg.DATA.VID_LIST_FILE)
+        return batch_gen
+    
 
 def get_trainer(cfg):
     if cfg.MODEL.NAME == "mstcn":
         return MSTCNTrainer(cfg)
     elif cfg.MODEL.NAME == "asformer":
         return ASFormerTrainer(cfg)
-    elif cfg.MODEL.NAME == "diffusion":
-        return DiffusionTrainer(cfg)
     elif cfg.MODEL.NAME == "c2f":
         return C2FTrainer(cfg)
 
@@ -33,16 +39,15 @@ def train(cfg):
     set_seed(cfg.TRAIN.SEED)
     trainer = get_trainer(cfg)
 
-    batch_gen = BatchGenerator(cfg)
-    batch_gen.read_data(cfg.DATA.VID_LIST_FILE)
+    train_dataset_loader = get_train_dataset_loader(cfg)
 
     logging.info(f"------ Training ---------")
     start_time = time.time()
     logging.info(f"Starting time: {start_time}")
-    trainer.train(batch_gen, cfg)
+    trainer.train(train_dataset_loader)
 
     logging.info("------ Evaluation ---------")
-    scores = trainer.predict(cfg)
+    scores = trainer.predict()
     logging.info(f"{scores}")
 
     end_time = time.time()
@@ -60,7 +65,7 @@ def eval(cfg):
     )
 
     logging.info("------ Evaluation ---------")
-    scores = trainer.predict(cfg)
+    scores = trainer.predict()
     logging.info(f"{scores}")
 
 
