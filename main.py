@@ -9,13 +9,22 @@ import time
 import numpy as np
 import torch
 
-from batch_gen import BatchGenerator
+from dataset.batch_gen import BatchGenerator
 from config import cfg, update_config
 from model.asformer import ASFormerTrainer
 from model.mstcn import MSTCNTrainer
 from model.c2f import C2FTrainer
 from utils.misc import read_actions, seconds_to_hours, set_seed
 
+
+def get_train_dataset_loader(cfg):
+    if cfg.MODEL.NAME == "diffact":
+        raise NotImplementedError
+    else:
+        batch_gen = BatchGenerator(cfg)
+        batch_gen.read_data(cfg.DATA.VID_LIST_FILE)
+        return batch_gen
+    
 
 def get_trainer(cfg):
     if cfg.MODEL.NAME == "mstcn":
@@ -30,13 +39,12 @@ def train(cfg):
     set_seed(cfg.TRAIN.SEED)
     trainer = get_trainer(cfg)
 
-    batch_gen = BatchGenerator(cfg)
-    batch_gen.read_data(cfg.DATA.VID_LIST_FILE)
+    train_dataset_loader = get_train_dataset_loader(cfg)
 
     logging.info(f"------ Training ---------")
     start_time = time.time()
     logging.info(f"Starting time: {start_time}")
-    trainer.train(batch_gen)
+    trainer.train(train_dataset_loader)
 
     logging.info("------ Evaluation ---------")
     scores = trainer.predict()

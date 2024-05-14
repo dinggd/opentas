@@ -5,6 +5,19 @@ import numpy as np
 import random
 
 
+class BatchGeneratorIterator(object):
+    def __init__(self, batch_gen):
+        self.batch_gen = batch_gen
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if not self.batch_gen.has_next():
+            raise StopIteration()
+        return self.batch_gen.next_batch()
+        
+
 class BatchGenerator(object):
     def __init__(self, cfg):
 
@@ -19,6 +32,12 @@ class BatchGenerator(object):
         self.gt_path = cfg.DATA.GT_PATH
         self.features_path = cfg.DATA.FEATURES_PATH
         self.sample_rate = cfg.DATA.SAMPLE_RATE
+        self.batch_size = cfg.TRAIN.BZ
+
+    def __iter__(self):
+        # Note: Very rough wrapper around BatchGenerator. Cannot have multiple iterators over BatchGenerator as self.reset() will affect all iterators.
+        self.reset()
+        return BatchGeneratorIterator(self)
 
     def reset(self):
         self.index = 0
@@ -34,11 +53,10 @@ class BatchGenerator(object):
         self.list_of_examples = file_ptr.read().split("\n")[:-1]
         file_ptr.close()
         self.list_of_examples.extend(aug_list)
-        random.shuffle(self.list_of_examples)
 
-    def next_batch(self, batch_size):
-        batch = self.list_of_examples[self.index : self.index + batch_size]
-        self.index += batch_size
+    def next_batch(self):
+        batch = self.list_of_examples[self.index : self.index + self.batch_size]
+        self.index += self.batch_size
 
         batch_input = []
         batch_target = []
@@ -78,5 +96,9 @@ class BatchGenerator(object):
             mask[i, :, : np.shape(batch_target[i])[0]] = torch.ones(
                 self.num_classes, np.shape(batch_target[i])[0]
             )
+
+        batch_input_tensor = batch_input_tensor.cuda()
+        batch_target_tensor = batch_target_tensor.cuda()
+        mask = mask.cuda()
 
         return batch_input_tensor, batch_target_tensor, mask

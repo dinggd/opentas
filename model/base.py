@@ -16,7 +16,8 @@ class BaseTrainer(ABC):
         self.init_model(self.cfg)
         self.init_criterion(self.cfg)
 
-    def train(self, batch_gen):
+    def train(self, train_dataset_loader):
+
         self.model.train()
         self.model.cuda()
 
@@ -51,18 +52,11 @@ class BaseTrainer(ABC):
 
         for epoch in tqdm(range(last_epoch, self.cfg.TRAIN.NUM_EPOCHS)):
             epoch_loss = 0
-            correct = 0
-            total = 0
+            metrics_accum_dict = self.get_empty_metrics_accum_dict(self.cfg)
 
-            while batch_gen.has_next():
-                batch_input, batch_target, mask = batch_gen.next_batch(self.cfg.TRAIN.BZ)
-                batch_input, batch_target, mask = (
-                    batch_input.cuda(),
-                    batch_target.cuda(),
-                    mask.cuda(),
-                )
+            for batch_train_data in train_dataset_loader:
 
-                loss, predictions = self.get_train_loss_preds((batch_input, batch_target, mask), self.cfg)
+                loss, predictions = self.get_train_loss_preds(batch_train_data, self.cfg)
 
                 epoch_loss += loss.item()
 
@@ -72,29 +66,21 @@ class BaseTrainer(ABC):
                 for optimizer in optimizers:
                     optimizer.step()
 
-                _, predicted = torch.max(predictions[-1].data, 1)
-                correct += torch.sum(
-                    (predicted == batch_target).float() * mask[:, 0, :].squeeze(1)
-                ).item()
-                total += torch.sum(mask[:, 0, :]).item()
+                self.accumulate_metrics(metrics_accum_dict, batch_train_data, predictions, self.cfg)
 
             for scheduler in schedulers:
                 scheduler.step(epoch_loss)
-
-            batch_gen.reset()
 
             if (
                 (epoch + 1) % self.cfg.TRAIN.LOG_FREQ == 0
                 or (epoch + 1) == self.cfg.TRAIN.NUM_EPOCHS
             ):
-                logging.info(
-                    "[epoch %d]: epoch loss = %f,   acc = %f"
-                    % (
-                        epoch + 1,
-                        epoch_loss / len(batch_gen.list_of_examples),
-                        float(correct) / total,
-                    )
-                )
+                scores_to_log = [f"epoch loss = {epoch_loss / len(train_dataset_loader.list_of_examples)}"]
+
+                score_dict = self.score_accumulated_metrics(metrics_accum_dict, self.cfg)
+                scores_to_log.extend([f"{k} = {v}" for k,v in score_dict.items()])
+                                    
+                logging.info(f"[epoch {epoch + 1}]: " + f", ".join(scores_to_log))
 
         torch.save(
             self.model.state_dict(),
@@ -195,7 +181,7 @@ class BaseTrainer(ABC):
         """Hook method. Define LR schedulers to use for training."""
         raise NotImplementedError()
     
-    
+
     def get_train_loss_preds(self, batch_train_data, cfg):
         """Hook method. Defines model's training protocol.
         
@@ -209,7 +195,34 @@ class BaseTrainer(ABC):
         """
         raise NotImplementedError()
     
+
+    def get_empty_metrics_accum_dict(self, cfg):
+        """Hook method. Creates the empty metrics accumulator dict at each epoch. Default for BatchGen data is provided."""
+        return {
+            "correct": 0,
+            "total": 0
+        }
     
+    
+    def accumulate_metrics(self, metrics_accum_dict, batch_train_data, predictions, cfg):
+        """Hook method. Accumulate the necessary metrics into the metrics accumulator dict."""
+        _, batch_target, mask = batch_train_data
+        _, predicted = torch.max(predictions[-1].data, 1)
+
+        metrics_accum_dict["correct"] += torch.sum(
+                (predicted == batch_target).float() * mask[:, 0, :].squeeze(1)
+            ).item()
+        
+        metrics_accum_dict["total"] += torch.sum(mask[:, 0, :]).item()
+        
+
+    def score_accumulated_metrics(self, metrics_accum_dict, cfg):
+        """Hook method. Return the scores to report from the accumulated metrics from the epoch."""
+        return {
+            "acc": float(metrics_accum_dict["correct"]) / metrics_accum_dict["total"]
+        }
+
+
     def get_eval_preds(self, test_input, actions_dict, cfg):
         """Hook method. Defines model's evaluation protocol.
         
