@@ -9,7 +9,7 @@ import time
 import numpy as np
 import torch
 
-from dataset.batch_gen import BatchGenerator
+from dataset.batch_gen import BatchGenerator, C2fDataset, collate_fn_override
 from config import cfg, update_config
 from model.asformer import ASFormerTrainer
 from model.mstcn import MSTCNTrainer
@@ -20,6 +20,15 @@ from utils.misc import read_actions, seconds_to_hours, set_seed
 def get_train_dataset_loader(cfg):
     if cfg.MODEL.NAME == "diffact":
         raise NotImplementedError
+    if cfg.MODEL.NAME == "c2f":
+        def _init_fn(worker_id):
+            np.random.seed(int(cfg.TRAIN.SEED))
+        train_dataset = C2fDataset(cfg, is_train=True)
+        train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=cfg.TRAIN.BZ, shuffle=True,
+                                                   pin_memory=True, num_workers=cfg.TRAIN.NUM_WORKER,
+                                                   collate_fn=collate_fn_override,
+                                                   worker_init_fn=_init_fn)
+        return train_loader
     else:
         batch_gen = BatchGenerator(cfg)
         batch_gen.read_data(cfg.DATA.VID_LIST_FILE)
@@ -104,7 +113,7 @@ def extra_train_config(cfg):
     cfg.TRAIN.RES_FILENAME = f"{cfg.TRAIN.LOG_DIR}/{cfg.TRAIN.EXP_NAME}.txt"
     cfg.TRAIN.CFG_FILENAME = f"{cfg.TRAIN.LOG_DIR}/{cfg.TRAIN.EXP_NAME}.yaml"
     cfg.freeze()
-    with open(cfg.TRAIN.CONF_FILENAME, "w") as f:
+    with open(cfg.TRAIN.CFG_FILENAME, "w") as f:
         f.write(cfg.dump())
 
 
@@ -144,3 +153,4 @@ if __name__ == "__main__":
         logging.info(pprint.pformat(args))
 
         train(cfg)
+

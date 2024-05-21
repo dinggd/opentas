@@ -1,0 +1,25 @@
+DATA:
+  PATH: "dataset"
+  DATASET: "gtea"
+  FEATURE_DIM: 2048
+  SPLIT: 1
+  CHUNK_SIZE: 4
+  MAX_FRAME_PER_VIDEO: 600
+  BG_CLASS: ['background']
+
+MODEL:
+  NAME: 'c2f'
+
+C2F:
+  ENSEMBLE_WEIGHTS: [1, 1, 1, 1, 0, 0]
+
+TRAIN:
+  BZ: 11
+  LR: 0.0005
+  NUM_EPOCHS: 300
+  WEIGHT_DECAY: 0.0003
+  STEP_SIZE: 300
+  GAMMA: 0.5
+  NUM_WORKER: 3
+  LOG_FREQ: 10
+

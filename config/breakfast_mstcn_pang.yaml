@@ -1,0 +1,19 @@
+DATA:
+  PATH: "dataset"
+  DATASET: "breakfast"
+  SAMPLE_RATE: 1
+  FEATURE_DIM: 2048
+  SPLIT: 1
+
+MODEL:
+  NAME: 'mstcn'
+
+MSTCN:
+  NUM_STAGES: 4
+  NUM_LAYERS: 10
+  NUM_F_MAPS: 64
+
+TRAIN:
+  BZ: 8
+  LR: 0.0005
+  NUM_EPOCHS: 50

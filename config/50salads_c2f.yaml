@@ -1,0 +1,25 @@
+DATA:
+  PATH: "dataset"
+  DATASET: "50salads"
+  FEATURE_DIM: 2048
+  SPLIT: 1
+  CHUNK_SIZE: 20
+  MAX_FRAME_PER_VIDEO: 960
+  BG_CLASS: ['action_start', 'action_end']
+
+MODEL:
+  NAME: 'c2f'
+
+C2F:
+  ENSEMBLE_WEIGHTS: [1, 1, 1, 1, 0, 0]
+
+TRAIN:
+  BZ: 20
+  LR: 0.0003
+  NUM_EPOCHS: 300
+  WEIGHT_DECAY: 0.001
+  STEP_SIZE: 300
+  GAMMA: 0.5
+  NUM_WORKER: 3
+  LOG_FREQ: 10
+

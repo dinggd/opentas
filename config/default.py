@@ -35,6 +35,9 @@ ASFORMER.CHANNEL_MASK_RATE = 0.3
 ASFORMER.R1 = 2
 ASFORMER.R2 = 2
 
+C2F = CN()
+C2F.ENSEMBLE_WEIGHTS = [1, 1, 1, 1, 0, 0]
+
 
 DIFFUSION = CN()
 DIFFUSION.ENCODER_PARAMS = CN()
@@ -104,6 +107,7 @@ _C.TRAIN.EXP_NAME = ""
 
 def update_config(cfg, args):
     cfg.defrost()
+    cfg.set_new_allowed(True) # allow new configurations.
     # read in config first to figure out the model being used
     cfg.merge_from_file(args.cfg)
     # load defaults to back model in case the yaml does not specify the some defaults
@@ -111,6 +115,8 @@ def update_config(cfg, args):
         cfg.MODEL.PARAMS = MSTCN
     elif cfg.MODEL.NAME == "asformer":
         cfg.MODEL.PARAMS = ASFORMER
+    elif cfg.MODEL.NAME == "c2f":
+        cfg.MODEL.PARAMS = C2F
     elif cfg.MODEL.NAME == "diffusion":
         cfg.MODEL.PARAMS = DIFFUSION
     # overwrite the existing/default configs with parsed in file and options
