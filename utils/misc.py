@@ -3,6 +3,7 @@ import torch
 import numpy as np
 import os
 import datetime
+from yacs.config import CfgNode
 
 
 def seconds_to_hours(seconds):
@@ -44,3 +45,23 @@ def generate_exp_name(args):
     time_string = datetime.datetime.now().strftime('%m%d-%H-%M-%S-%f')[:-3]
     exp = f"cd{args.condense}"
     return f"{time_string}_{args.dataset}_{args.model}_{args.split}_{exp}"
+
+
+def cfg_convert_to_dict(cfg_node, key_list):
+    """Modified `convert_to_dict()` from the original `yacs/config.py`"""
+
+    # CfgNodes can only contain a limited set of valid types
+    _VALID_TYPES = {tuple, list, str, int, float, bool, type(None)}
+
+    if not isinstance(cfg_node, CfgNode):
+        assert \
+            type(cfg_node) in _VALID_TYPES, \
+            "Key {} with value {} is not a valid type; valid types: {}".format(
+                ".".join(key_list), type(cfg_node), _VALID_TYPES)
+        return cfg_node
+    
+    else:
+        cfg_dict = dict(cfg_node)
+        for k, v in cfg_dict.items():
+            cfg_dict[k] = cfg_convert_to_dict(v, key_list + [k])
+        return cfg_dict

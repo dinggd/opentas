@@ -10,16 +10,18 @@ import numpy as np
 import torch
 
 from dataset.batch_gen import BatchGenerator
+from dataset.diffact_data import get_data_loader
 from config import cfg, update_config
 from model.asformer import ASFormerTrainer
 from model.mstcn import MSTCNTrainer
+from model.diffact import DiffActTrainer
 from model.c2f import C2FTrainer
 from utils.misc import read_actions, seconds_to_hours, set_seed
 
 
 def get_train_dataset_loader(cfg):
     if cfg.MODEL.NAME == "diffact":
-        raise NotImplementedError
+        return get_data_loader(cfg, mode="train")
     else:
         batch_gen = BatchGenerator(cfg)
         batch_gen.read_data(cfg.DATA.VID_LIST_FILE)
@@ -31,6 +33,8 @@ def get_trainer(cfg):
         return MSTCNTrainer(cfg)
     elif cfg.MODEL.NAME == "asformer":
         return ASFormerTrainer(cfg)
+    elif cfg.MODEL.NAME == "diffact":
+        return DiffActTrainer(cfg)
     elif cfg.MODEL.NAME == "c2f":
         return C2FTrainer(cfg)
 
