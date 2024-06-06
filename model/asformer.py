@@ -607,7 +607,7 @@ class ASFormerTrainer(BaseTrainer):
         return loss, predictions
     
     # Override
-    def get_eval_preds(self, test_input, actions_dict, cfg):
+    def get_eval_preds(self, test_input, full_len, actions_dict, cfg):
 
         predictions = self.model(test_input, torch.ones(test_input.size()).cuda())
         predicted_classes = [

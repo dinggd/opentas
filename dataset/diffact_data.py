@@ -7,6 +7,7 @@ from torch.utils.data import Dataset
 from scipy.interpolate import interp1d
 from eval import get_labels_start_end_time
 from scipy.ndimage import gaussian_filter1d
+import logging
 
 def get_data_dict(feature_dir, label_dir, video_list, actions_dict, sample_rate=4, temporal_aug=True, boundary_smooth=None):
     
@@ -21,7 +22,7 @@ def get_data_dict(feature_dir, label_dir, video_list, actions_dict, sample_rate=
         } for k in video_list
     }
     
-    print(f'Loading Dataset ...')
+    logging.info(f'Loading Dataset ...')
     
     for video in tqdm(video_list):
         

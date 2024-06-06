@@ -438,7 +438,7 @@ class ASDiffusionModel(nn.Module):
         x_start = None
         for time, time_next in time_pairs:
 
-            time_cond = torch.full((1,), time, dtype=torch.long).cuda
+            time_cond = torch.full((1,), time, dtype=torch.long).cuda()
 
             pred_noise, x_start = self.model_predictions(
                 backbone_feats, x_time, time_cond
@@ -974,55 +974,62 @@ class DiffActTrainer(BaseTrainer):
     # Override
     def accumulate_metrics(self, metrics_accum_dict, batch_train_data, predictions, cfg):
         _, label, _, _ = batch_train_data  # label torch.Size([1, T])
-        _, predicted = torch.max(predictions[-1].data, 1)
+        _, predicted = torch.max(predictions.data, 1)
 
-        metrics_accum_dict["correct"] += torch.sum(
-            (predicted == label).float()).item()
+        metrics_accum_dict["correct"] += torch.sum(predicted.cpu() == label)
         metrics_accum_dict["total"] += label.shape[-1] # No. of frames
 
     # Override
-    def get_eval_preds(self, test_input, actions_dict, cfg):
-        # Default mode suggested in original DiffAct code is "decoder-agg"
-        _, pred, _ = self.test_single_video(test_input, "decoder-agg", cfg)
-        pred = [actions_dict[int(i)] for i in pred]
-        return pred
+    def score_accumulated_metrics(self, metrics_accum_dict, epoch_loss, train_dataset_loader, cfg):
+        """Hook method. Return the scores to report from the accumulated metrics from the epoch."""
+        return {
+            "epoch loss": float(epoch_loss / len(train_dataset_loader.dataset.video_list)),
+            "acc": float(metrics_accum_dict["correct"]) / metrics_accum_dict["total"]
+        }
 
-    def test_single_video(self, test_input, mode, cfg):
+    # Override
+    def get_eval_preds(self, test_input, full_len, actions_dict, cfg):
+        # Default mode suggested in original DiffAct code is "decoder-agg"
+        predictions = self.test_single_video(test_input, full_len, "decoder-agg", cfg)
+        predicted_classes = [
+            list(actions_dict.keys())[
+                list(actions_dict.values()).index(pred.item())
+            ] for pred in predictions]
+        return predicted_classes
+
+    def test_single_video(self, test_input, full_len, mode, cfg):
 
         assert(mode in ['encoder', 'decoder-noagg', 'decoder-agg'])
         assert(cfg.MODEL.PARAMS.POSTPROCESS.TYPE in ['median', 'mode', 'purge', None])
 
-        if self.set_sampling_seed:
+        if cfg.TRAIN.SET_SAMPLING_SEED:
             seed = cfg.TRAIN.SEED
         else:
             seed = None
             
         with torch.no_grad():
-
-            feature = test_input
-
+            sample_rate = cfg.DATA.SAMPLE_RATE
+            feature = [ test_input ]
             # feature:   [torch.Size([1, F, Sampled T])]
-            # label:     torch.Size([1, Original T])
-            # output: [torch.Size([1, C, Sampled T])]
 
             if mode == 'encoder':
                 output = [self.model.encoder(feature[i].cuda()) 
                        for i in range(len(feature))] # output is a list of tuples
                 output = [F.softmax(i, 1).cpu() for i in output]
-                left_offset = self.sample_rate // 2
-                right_offset = (self.sample_rate - 1) // 2
+                left_offset = sample_rate // 2
+                right_offset = (sample_rate - 1) // 2
 
             if mode == 'decoder-agg':
                 output = [self.model.ddim_sample(feature[i].cuda(), seed) 
                            for i in range(len(feature))] # output is a list of tuples
                 output = [i.cpu() for i in output]
-                left_offset = self.sample_rate // 2
-                right_offset = (self.sample_rate - 1) // 2
+                left_offset = sample_rate // 2
+                right_offset = (sample_rate - 1) // 2
 
             if mode == 'decoder-noagg':  # temporal aug must be true
                 output = [self.model.ddim_sample(feature[len(feature)//2].cuda(), seed)] # output is a list of tuples
                 output = [i.cpu() for i in output]
-                left_offset = self.sample_rate // 2
+                left_offset = sample_rate // 2
                 right_offset = 0
 
             assert(output[0].shape[0] == 1)
@@ -1041,10 +1048,10 @@ class DiffActTrainer(BaseTrainer):
             output = np.argmax(output, 0)
 
             output = restore_full_sequence(output, 
-                full_len=label.shape[-1], 
+                full_len=full_len, 
                 left_offset=left_offset, 
                 right_offset=right_offset, 
-                sample_rate=self.sample_rate
+                sample_rate=sample_rate
             )
 
             if cfg.MODEL.PARAMS.POSTPROCESS.TYPE == 'mode': # after restoring full sequence
@@ -1067,11 +1074,7 @@ class DiffActTrainer(BaseTrainer):
                             output[starts[e]:mid] = trans[e-1]
                             output[mid:ends[e]] = trans[e+1]
 
-            label = label.squeeze(0).cpu().numpy()
-
-            assert(output.shape == label.shape)
-            
-            return video, output, label
+            return output
     
     
     def mode_filter(x, size):
