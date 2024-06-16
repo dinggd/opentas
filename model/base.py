@@ -90,7 +90,7 @@ class BaseTrainer(ABC):
                 f"{self.cfg.TRAIN.MODEL_DIR}/epoch-{self.cfg.TRAIN.NUM_EPOCHS}-opt{opt_idx}.opt",
             )
 
-    def predict(self):
+    def predict(self, test_dataset_loader):
         self.cfg.DATA.FEATURES_PATH,
         self.cfg.DATA.VID_LIST_FILE_TEST,
         self.cfg.DATA.ACTIONS_DICT,
@@ -106,16 +106,11 @@ class BaseTrainer(ABC):
         with torch.no_grad():
             self.model.cuda()
 
-            for vid in list_of_vids:
-                orig_feats = np.load(os.path.join(self.cfg.DATA.FEATURES_PATH, 
-                                                  f"{vid.split('.')[0]}.npy"))
-                sampled_feats = orig_feats[:, :: self.cfg.DATA.SAMPLE_RATE]
-                input_x = torch.tensor(sampled_feats, dtype=torch.float).unsqueeze(0).cuda()
-
-                predicted_classes = self.get_eval_preds(input_x, orig_feats.shape[-1], 
+            for test_sample in test_dataset_loader:
+                video, predicted_classes = self.get_eval_preds(test_sample, 
                                                         actions_dict, self.cfg)
 
-                f_name = vid.split("/")[-1].split(".")[0]
+                f_name = video.split("/")[-1].split(".")[0]
                 with open(f"{self.cfg.TRAIN.RESULT_DIR}/{f_name}", "w") as f:
                     f.write("### Frame level recognition: ###\n")
                     f.write(" ".join(predicted_classes))
@@ -196,7 +191,7 @@ class BaseTrainer(ABC):
         """Hook method. Defines model's training protocol.
         
         Args:
-        - `batch_train_data`: A batch of training data from the dataset
+        - `batch_train_data`: A batch of training data from the dataset. Default: (batch_input, batch_target, mask)
 
         Returns:
         A Tuple containing:
@@ -221,7 +216,7 @@ class BaseTrainer(ABC):
         
         Args:
         - `metrics_accum_dict`: Dictionary containing metrics accumulated throughout the current epoch
-        - `batch_train_data`: Current batch of training data
+        - `batch_train_data`: Current batch of training data. Default: (batch_input, batch_target, mask)
         - `predictions`: Predictions for the current batch of training data
         """
         _, batch_target, mask = batch_train_data
@@ -249,15 +244,16 @@ class BaseTrainer(ABC):
         }
 
 
-    def get_eval_preds(self, test_input, full_len, actions_dict, cfg):
+    def get_eval_preds(self, test_sample, actions_dict, cfg):
         """Hook method. Defines model's evaluation protocol.
         
         Args:
-        - `test_input`: The test sample
-        - `full_len`: Original temporal length of the test sample
+        - `test_sample`: The test sample. Default: (video, sampled_feats)
         - `actions_dict`: The dictionary of action indices to labels
 
         Returns:
-        A List `predicted_classes` containing the frame-wise label predictions for each frame in the test sample
+        A Tuple containing:
+        - a str `video` containing the name of the sample
+        - a List `predicted_classes` containing the frame-wise label predictions for each frame in the test sample
         """
         raise NotImplementedError()

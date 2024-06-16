@@ -121,9 +121,11 @@ class MSTCNTrainer(BaseTrainer):
         return loss, predictions
         
     # Override
-    def get_eval_preds(self, test_input, full_len, actions_dict, cfg):
+    def get_eval_preds(self, test_input, actions_dict, cfg):
 
-        predictions = self.model(test_input, torch.ones(test_input.size()).cuda())
+        video, sampled_feats = test_input
+
+        predictions = self.model(sampled_feats, torch.ones(sampled_feats.size()).cuda())
         predicted_classes = [
             list(actions_dict.keys())[
                 list(actions_dict.values()).index(pred.item())
@@ -131,4 +133,4 @@ class MSTCNTrainer(BaseTrainer):
             for pred in torch.max(predictions[-1].data, 1)[1].squeeze()
         ] * cfg.DATA.SAMPLE_RATE
 
-        return predicted_classes
+        return video, predicted_classes

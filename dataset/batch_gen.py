@@ -3,9 +3,10 @@
 import torch
 import numpy as np
 import random
+import os
 
 
-class BatchGeneratorIterator(object):
+class GeneratorIterator(object):
     def __init__(self, batch_gen):
         self.batch_gen = batch_gen
 
@@ -35,18 +36,16 @@ class BatchGenerator(object):
         self.batch_size = cfg.TRAIN.BZ
 
     def __iter__(self):
-        # Note: Very rough wrapper around BatchGenerator. Cannot have multiple iterators over BatchGenerator as self.reset() will affect all iterators.
+        # Note: Very rough wrapper around Generator. Cannot have multiple iterators as self.reset() will affect all iterators over this instance.
         self.reset()
-        return BatchGeneratorIterator(self)
+        return GeneratorIterator(self)
 
     def reset(self):
         self.index = 0
         random.shuffle(self.list_of_examples)
 
     def has_next(self):
-        if self.index < len(self.list_of_examples):
-            return True
-        return False
+        return self.index < len(self.list_of_examples)
 
     def read_data(self, vid_list_file, aug_list=[]):
         file_ptr = open(vid_list_file, "r")
@@ -102,3 +101,38 @@ class BatchGenerator(object):
         mask = mask.cuda()
 
         return batch_input_tensor, batch_target_tensor, mask
+
+
+class TestSampleGenerator(object):
+    def __init__(self, cfg):
+        self.list_of_examples = list()
+        self.index = 0
+        self.features_path = cfg.DATA.FEATURES_PATH
+        self.sample_rate = cfg.DATA.SAMPLE_RATE
+
+    def __iter__(self):
+        # Note: Very rough wrapper around Generator. Cannot have multiple iterators as self.reset() will affect all iterators over this instance.
+        self.reset()
+        return GeneratorIterator(self)
+
+    def reset(self):
+        self.index = 0
+
+    def has_next(self):
+        return self.index < len(self.list_of_examples)
+
+    def read_data(self, vid_list_file, aug_list=[]):
+        file_ptr = open(vid_list_file, "r")
+        self.list_of_examples = file_ptr.read().split("\n")[:-1]
+        file_ptr.close()
+        self.list_of_examples.extend(aug_list)
+
+    def next_batch(self):
+        video = self.list_of_examples[self.index]
+        self.index += 1
+
+        orig_feats = np.load(os.path.join(self.features_path, 
+                                          f"{video.split('.')[0]}.npy"))
+        sampled_feats = orig_feats[:, ::self.sample_rate]
+        sampled_feats = torch.tensor(sampled_feats, dtype=torch.float).unsqueeze(0).cuda()
+        return video, sampled_feats

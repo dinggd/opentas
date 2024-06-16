@@ -9,7 +9,7 @@ import time
 import numpy as np
 import torch
 
-from dataset.batch_gen import BatchGenerator
+from dataset.batch_gen import BatchGenerator, TestSampleGenerator
 from dataset.diffact_data import get_data_loader
 from config import cfg, update_config
 from model.asformer import ASFormerTrainer
@@ -28,6 +28,15 @@ def get_train_dataset_loader(cfg):
         return batch_gen
     
 
+def get_test_dataset_loader(cfg):
+    if cfg.MODEL.NAME == "diffact":
+        return get_data_loader(cfg, mode="test")
+    else:
+        test_gen = TestSampleGenerator(cfg)
+        test_gen.read_data(cfg.DATA.VID_LIST_FILE_TEST)
+        return test_gen
+    
+
 def get_trainer(cfg):
     if cfg.MODEL.NAME == "mstcn":
         return MSTCNTrainer(cfg)
@@ -43,15 +52,15 @@ def train(cfg):
     set_seed(cfg.TRAIN.SEED)
     trainer = get_trainer(cfg)
 
-    train_dataset_loader = get_train_dataset_loader(cfg)
-
     logging.info(f"------ Training ---------")
+    train_dataset_loader = get_train_dataset_loader(cfg)
     start_time = time.time()
     logging.info(f"Starting time: {start_time}")
     trainer.train(train_dataset_loader)
 
     logging.info("------ Evaluation ---------")
-    scores = trainer.predict()
+    test_dataset_loader = get_test_dataset_loader(cfg)
+    scores = trainer.predict(test_dataset_loader)
     logging.info(f"{scores}")
 
     end_time = time.time()
@@ -69,7 +78,8 @@ def eval(cfg):
     )
 
     logging.info("------ Evaluation ---------")
-    scores = trainer.predict()
+    test_dataset_loader = get_test_dataset_loader(cfg)
+    scores = trainer.predict(test_dataset_loader)
     logging.info(f"{scores}")
 
 
