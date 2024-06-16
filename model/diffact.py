@@ -904,11 +904,13 @@ class DiffActTrainer(BaseTrainer):
             cfg.DATA.FEATURE_DIM
         )
 
+
     # Override
     def init_criterion(self, cfg):
         self.ce_criterion = None # To be initialized in overridden train()
         self.bce_criterion = nn.BCELoss(reduction='none')
         self.mse_criterion = nn.MSELoss(reduction='none')
+
 
     # Override
     def train(self, train_dataset_loader):
@@ -926,58 +928,69 @@ class DiffActTrainer(BaseTrainer):
         # Resume flow of base class
         super(DiffActTrainer, self).train(train_dataset_loader)
 
+
     # Override
     def get_optimizers(self, cfg):
         return [optim.Adam(self.model.parameters(), 
                            lr=cfg.TRAIN.LR, 
                            weight_decay=cfg.TRAIN.WEIGHT_DECAY)]
-    
+
+
     # Override
     def get_schedulers(self, optimizers, cfg):
         return [] # No schedulers
-    
+
+
     # Override
     def get_train_loss_preds(self, batch_train_data, cfg):
 
-        feature, label, boundary, video = batch_train_data
-        feature, label, boundary = feature.cuda(), label.cuda(), boundary.cuda()
-        
-        loss_dict, event_out = self.model.get_training_loss(feature, 
-            event_gt=F.one_hot(label.long(), num_classes=cfg.DATA.NUM_CLASSES).permute(0, 2, 1),
-            boundary_gt=boundary,
-            encoder_ce_criterion=self.ce_criterion, 
-            encoder_mse_criterion=self.mse_criterion,
-            encoder_boundary_criterion=self.bce_criterion,
-            decoder_ce_criterion=self.ce_criterion,
-            decoder_mse_criterion=self.mse_criterion,
-            decoder_boundary_criterion=self.bce_criterion,
-            soft_label=cfg.TRAIN.SOFT_LABEL
-        )
+        batch_loss = 0
+        batch_preds = []
 
-        # ##############
-        # # feature    torch.Size([1, F, T])
-        # # label      torch.Size([1, T])
-        # # boundary   torch.Size([1, 1, T])
-        # # output    torch.Size([1, C, T]) 
-        # ##################
+        # Based on original code where only one sample at a time is passed to get_training_loss()
+        # to account for different video lengths
+        for feature, label, boundary, video in batch_train_data:
+            feature, label, boundary = feature.cuda(), label.cuda(), boundary.cuda()
+            
+            loss_dict, event_out = self.model.get_training_loss(feature, 
+                event_gt=F.one_hot(label.long(), num_classes=cfg.DATA.NUM_CLASSES).permute(0, 2, 1),
+                boundary_gt=boundary,
+                encoder_ce_criterion=self.ce_criterion, 
+                encoder_mse_criterion=self.mse_criterion,
+                encoder_boundary_criterion=self.bce_criterion,
+                decoder_ce_criterion=self.ce_criterion,
+                decoder_mse_criterion=self.mse_criterion,
+                decoder_boundary_criterion=self.bce_criterion,
+                soft_label=cfg.TRAIN.SOFT_LABEL
+            )
 
-        total_loss = 0
+            # ##############
+            # # feature    torch.Size([1, F, T])
+            # # label      torch.Size([1, T])
+            # # boundary   torch.Size([1, 1, T])
+            # # output    torch.Size([1, C, T]) 
+            # ##################
+            
+            sample_loss = 0
 
-        for k,v in loss_dict.items():
-            total_loss += cfg.LOSS_WEIGHTS[k.upper()] * v
+            for k,v in loss_dict.items():
+                sample_loss += cfg.LOSS_WEIGHTS[k.upper()] * v
 
-        batch_size = feature.shape[0]
-        total_loss /= batch_size
+            batch_loss += (sample_loss / cfg.TRAIN.BZ)
+            batch_preds.append(event_out)
 
-        return total_loss, event_out
-    
+        return batch_loss, batch_preds
+
+
     # Override
     def accumulate_metrics(self, metrics_accum_dict, batch_train_data, predictions, cfg):
-        _, label, _, _ = batch_train_data  # label torch.Size([1, T])
-        _, predicted = torch.max(predictions.data, 1)
+        for batch_idx in range(len(batch_train_data)):
+            _, label, _, _ = batch_train_data[batch_idx]  # label torch.Size([1, T])
+            _, predicted = torch.max(predictions[batch_idx].data, 1)
 
-        metrics_accum_dict["correct"] += torch.sum(predicted.cpu() == label)
-        metrics_accum_dict["total"] += label.shape[-1] # No. of frames
+            metrics_accum_dict["correct"] += torch.sum(predicted.cpu() == label)
+            metrics_accum_dict["total"] += label.shape[-1] # No. of frames
+
 
     # Override
     def score_accumulated_metrics(self, metrics_accum_dict, epoch_loss, train_dataset_loader, cfg):
@@ -987,17 +1000,19 @@ class DiffActTrainer(BaseTrainer):
             "acc": float(metrics_accum_dict["correct"]) / metrics_accum_dict["total"]
         }
 
+
     # Override
-    def get_eval_preds(self, test_input, full_len, actions_dict, cfg):
+    def get_eval_preds(self, test_sample, actions_dict, cfg):
         # Default mode suggested in original DiffAct code is "decoder-agg"
-        predictions = self.test_single_video(test_input, full_len, "decoder-agg", cfg)
+        video, predictions = self.test_single_video(test_sample, "decoder-agg", cfg)
         predicted_classes = [
             list(actions_dict.keys())[
                 list(actions_dict.values()).index(pred.item())
             ] for pred in predictions]
-        return predicted_classes
+        return video, predicted_classes
 
-    def test_single_video(self, test_input, full_len, mode, cfg):
+
+    def test_single_video(self, test_sample, mode, cfg):
 
         assert(mode in ['encoder', 'decoder-noagg', 'decoder-agg'])
         assert(cfg.MODEL.PARAMS.POSTPROCESS.TYPE in ['median', 'mode', 'purge', None])
@@ -1009,8 +1024,12 @@ class DiffActTrainer(BaseTrainer):
             
         with torch.no_grad():
             sample_rate = cfg.DATA.SAMPLE_RATE
-            feature = [ test_input ]
+
+            feature, label, _, video = test_sample
+
             # feature:   [torch.Size([1, F, Sampled T])]
+            # label:     torch.Size([1, Original T])
+            # output: [torch.Size([1, C, Sampled T])]
 
             if mode == 'encoder':
                 output = [self.model.encoder(feature[i].cuda()) 
@@ -1048,7 +1067,7 @@ class DiffActTrainer(BaseTrainer):
             output = np.argmax(output, 0)
 
             output = restore_full_sequence(output, 
-                full_len=full_len, 
+                full_len=label.shape[-1], 
                 left_offset=left_offset, 
                 right_offset=right_offset, 
                 sample_rate=sample_rate
@@ -1074,12 +1093,16 @@ class DiffActTrainer(BaseTrainer):
                             output[starts[e]:mid] = trans[e-1]
                             output[mid:ends[e]] = trans[e+1]
 
-            return output
+            label = label.squeeze(0).cpu().numpy()
+
+            assert(output.shape == label.shape)
+            
+            return video, output
     
     
-    def mode_filter(x, size):
+    def mode_filter(self, x, size):
         def modal(P):
-            mode = stats.mode(P)
+            mode = stats.mode(P, keepdims=True)
             return mode.mode[0]
         result = generic_filter(x, modal, size)
         return result

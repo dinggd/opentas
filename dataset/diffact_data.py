@@ -3,7 +3,7 @@ import torch
 import random
 import numpy as np
 from tqdm import tqdm
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, default_collate
 from scipy.interpolate import interp1d
 from eval import get_labels_start_end_time
 from scipy.ndimage import gaussian_filter1d
@@ -210,5 +210,17 @@ def get_data_loader(cfg, mode=["train", "test"]):
     )
 
     dataset = VideoFeatureDataset(data_dict, cfg.DATA.NUM_CLASSES, mode=mode)
-    return torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True, 
+
+    if mode == "test":
+        return torch.utils.data.DataLoader(dataset, batch_size=None, shuffle=False, 
+                                           num_workers=4)
+
+    # Modified handling of mode=train dataloader to handle batching during training
+    def collate_as_list(batch): 
+        # Inflate a batch dimension to maintain shape compatibility with DiffAct code
+        return [ default_collate([sample]) for sample in batch ]
+    
+    return torch.utils.data.DataLoader(dataset, batch_size=cfg.TRAIN.BZ, 
+                                       collate_fn=collate_as_list,
+                                       drop_last=False, shuffle=True, 
                                        num_workers=4)
