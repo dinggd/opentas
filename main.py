@@ -118,7 +118,7 @@ def extra_train_config(cfg):
     cfg.TRAIN.RES_FILENAME = f"{cfg.TRAIN.LOG_DIR}/{cfg.TRAIN.EXP_NAME}.txt"
     cfg.TRAIN.CFG_FILENAME = f"{cfg.TRAIN.LOG_DIR}/{cfg.TRAIN.EXP_NAME}.yaml"
     cfg.freeze()
-    with open(cfg.TRAIN.CONF_FILENAME, "w") as f:
+    with open(cfg.TRAIN.CFG_FILENAME, "w") as f:
         f.write(cfg.dump())
 
 
