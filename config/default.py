@@ -83,7 +83,7 @@ _C.TRAIN.BOUNDARY_SMOOTH = 1
 _C.TRAIN.SOFT_LABEL = 1.4
 _C.TRAIN.LOG_TRAIN_RESULTS = False
 _C.TRAIN.LOG_FREQ = 100
-_C.TRAIN.CHCKPT_FREQ = 100
+_C.TRAIN.CHCKPT_FREQ = None
 _C.TRAIN.SET_SAMPLING_SEED = True
 _C.TRAIN.SEED = 1538574472
 
@@ -118,3 +118,6 @@ def update_config(cfg, args):
     # overwrite the existing/default configs with parsed in file and options
     cfg.merge_from_file(args.cfg)
     cfg.merge_from_list(args.opts)
+    # use log_freq if chckpt_freq is not specified
+    if cfg.TRAIN.CHCKPT_FREQ is None:
+        cfg.TRAIN.CHCKPT_FREQ = cfg.TRAIN.LOG_FREQ
