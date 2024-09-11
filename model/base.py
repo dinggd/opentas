@@ -71,24 +71,25 @@ class BaseTrainer(ABC):
             for scheduler in schedulers:
                 scheduler.step(epoch_loss)
 
-            if (
-                (epoch + 1) % self.cfg.TRAIN.LOG_FREQ == 0
-                or (epoch + 1) == self.cfg.TRAIN.NUM_EPOCHS
-            ):
+            if ((epoch + 1) % self.cfg.TRAIN.LOG_FREQ == 0
+                or (epoch + 1) == self.cfg.TRAIN.NUM_EPOCHS):
                 score_dict = self.score_accumulated_metrics(metrics_accum_dict, epoch_loss, 
                                                             train_dataset_loader, self.cfg)
                 scores_to_log = [f"{k} = {v}" for k,v in score_dict.items()]
                 logging.info(f"[epoch {epoch + 1}]: " + f", ".join(scores_to_log))
 
-        torch.save(
-            self.model.state_dict(),
-            f"{self.cfg.TRAIN.MODEL_DIR}/epoch-{self.cfg.TRAIN.NUM_EPOCHS}.model",
-        )
-        for opt_idx in range(len(optimizers)):
-            torch.save(
-                optimizers[opt_idx].state_dict(),
-                f"{self.cfg.TRAIN.MODEL_DIR}/epoch-{self.cfg.TRAIN.NUM_EPOCHS}-opt{opt_idx}.opt",
-            )
+            if ((epoch + 1) % self.cfg.TRAIN.CHCKPT_FREQ == 0
+                or (epoch + 1) == self.cfg.TRAIN.NUM_EPOCHS):
+                torch.save(
+                    self.model.state_dict(),
+                    f"{self.cfg.TRAIN.MODEL_DIR}/epoch-{epoch + 1}.model",
+                )
+                for opt_idx in range(len(optimizers)):
+                    torch.save(
+                        optimizers[opt_idx].state_dict(),
+                        f"{self.cfg.TRAIN.MODEL_DIR}/epoch-{epoch + 1}-opt{opt_idx}.opt",
+                    )
+                logging.info(f"[epoch {epoch + 1}]: Checkpoint created")
 
     def predict(self, test_dataset_loader):
         self.cfg.DATA.FEATURES_PATH,
