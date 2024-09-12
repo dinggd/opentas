@@ -91,7 +91,7 @@ class BaseTrainer(ABC):
                     )
                 logging.info(f"[epoch {epoch + 1}]: Checkpoint created")
 
-    def predict(self, test_dataset_loader):
+    def predict(self, test_dataset_loader, res_filename=None):
         self.cfg.DATA.FEATURES_PATH,
         self.cfg.DATA.VID_LIST_FILE_TEST,
         self.cfg.DATA.ACTIONS_DICT,
@@ -152,8 +152,9 @@ class BaseTrainer(ABC):
 
             f1 = np.nan_to_num(f1) * 100
             final.append(f1)
-            
-        np.savetxt(self.cfg.TRAIN.RES_FILENAME, np.array([final]), fmt="%1.2f")
+        
+        np.savetxt(res_filename if res_filename is not None else self.cfg.TRAIN.RES_FILENAME, 
+                   np.array([final]), fmt="%1.2f")
         return final
     
     

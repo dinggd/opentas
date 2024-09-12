@@ -73,14 +73,25 @@ def train(cfg):
 
 def eval(cfg):
     trainer = get_trainer(cfg)
-    trainer.model.load_state_dict(
-        torch.load(f"{cfg.TRAIN.MODEL_DIR}/epoch-{cfg.TRAIN.NUM_EPOCHS}.model")
-    )
+    test_dataset_loader = get_test_dataset_loader(cfg)
+
+    if cfg.TRAIN.EVAL_CHCKPTS:
+         # eval all checkpointed epochs
+        chckpt_epochs = list(range(cfg.TRAIN.CHCKPT_FREQ, cfg.TRAIN.NUM_EPOCHS, cfg.TRAIN.CHCKPT_FREQ))
+    else:
+        chckpt_epochs = []
+    # always eval the last epoch's model
+    chckpt_epochs.append(cfg.TRAIN.NUM_EPOCHS)
 
     logging.info("------ Evaluation ---------")
-    test_dataset_loader = get_test_dataset_loader(cfg)
-    scores = trainer.predict(test_dataset_loader)
-    logging.info(f"{scores}")
+    res_dir, res_file = os.path.split(cfg.TRAIN.RES_FILENAME)
+    for chckpt_epoch in chckpt_epochs:
+        logging.info(f"Loading model saved at epoch {chckpt_epoch}")
+        trainer.model.load_state_dict(
+            torch.load(f"{cfg.TRAIN.MODEL_DIR}/epoch-{chckpt_epoch}.model"))
+        scores = trainer.predict(test_dataset_loader, 
+                                 os.path.join(res_dir, f"epoch_{chckpt_epoch}_" + res_file))
+        logging.info(f"{scores}")
 
 
 def extra_train_config(cfg):
@@ -142,7 +153,7 @@ if __name__ == "__main__":
     update_config(cfg, args)
 
     # eval
-    if cfg.TRAIN.EVAL:
+    if cfg.TRAIN.EVAL or cfg.TRAIN.EVAL_CHCKPTS:
         log_redirect(cfg.TRAIN.LOG_FILENAME)
 
         logging.info(pprint.pformat(args))
