@@ -85,13 +85,19 @@ def eval(cfg):
 
     logging.info("------ Evaluation ---------")
     res_dir, res_file = os.path.split(cfg.TRAIN.RES_FILENAME)
-    for chckpt_epoch in chckpt_epochs:
-        logging.info(f"Loading model saved at epoch {chckpt_epoch}")
-        trainer.model.load_state_dict(
-            torch.load(f"{cfg.TRAIN.MODEL_DIR}/epoch-{chckpt_epoch}.model"))
-        scores = trainer.predict(test_dataset_loader, 
-                                 os.path.join(res_dir, f"epoch_{chckpt_epoch}_" + res_file))
-        logging.info(f"{scores}")
+
+    eval_dir = os.path.join(res_dir, "eval")
+    os.makedirs(eval_dir, exist_ok=True)
+
+    with open(os.path.join(eval_dir, f"all_epochs_" + res_file), "w") as eval_fp:
+        for chckpt_epoch in chckpt_epochs:
+            logging.info(f"Loading model saved at epoch {chckpt_epoch}")
+            trainer.model.load_state_dict(
+                torch.load(f"{cfg.TRAIN.MODEL_DIR}/epoch-{chckpt_epoch}.model"))
+            scores = trainer.predict(test_dataset_loader, 
+                                    os.path.join(eval_dir, f"epoch_{chckpt_epoch}_" + res_file))
+            logging.info(f"{scores}")
+            eval_fp.write(f"{chckpt_epoch} {' '.join(['{:1.2f}'.format(score) for score in scores])}\n")
 
 
 def extra_train_config(cfg):
