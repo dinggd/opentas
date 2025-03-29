@@ -71,28 +71,27 @@ class BaseTrainer(ABC):
             for scheduler in schedulers:
                 scheduler.step(epoch_loss)
 
-            if (
-                (epoch + 1) % self.cfg.TRAIN.LOG_FREQ == 0
-                or (epoch + 1) == self.cfg.TRAIN.NUM_EPOCHS
-            ):
-                scores_to_log = [f"epoch loss = {epoch_loss / len(train_dataset_loader.list_of_examples)}"]
-
-                score_dict = self.score_accumulated_metrics(metrics_accum_dict, self.cfg)
-                scores_to_log.extend([f"{k} = {v}" for k,v in score_dict.items()])
-                                    
+            if ((epoch + 1) % self.cfg.TRAIN.LOG_FREQ == 0
+                or (epoch + 1) == self.cfg.TRAIN.NUM_EPOCHS):
+                score_dict = self.score_accumulated_metrics(metrics_accum_dict, epoch_loss, 
+                                                            train_dataset_loader, self.cfg)
+                scores_to_log = [f"{k} = {v}" for k,v in score_dict.items()]
                 logging.info(f"[epoch {epoch + 1}]: " + f", ".join(scores_to_log))
 
-        torch.save(
-            self.model.state_dict(),
-            f"{self.cfg.TRAIN.MODEL_DIR}/epoch-{self.cfg.TRAIN.NUM_EPOCHS}.model",
-        )
-        for opt_idx in range(len(optimizers)):
-            torch.save(
-                optimizers[opt_idx].state_dict(),
-                f"{self.cfg.TRAIN.MODEL_DIR}/epoch-{self.cfg.TRAIN.NUM_EPOCHS}-opt{opt_idx}.opt",
-            )
+            if ((epoch + 1) % self.cfg.TRAIN.CHCKPT_FREQ == 0
+                or (epoch + 1) == self.cfg.TRAIN.NUM_EPOCHS):
+                torch.save(
+                    self.model.state_dict(),
+                    f"{self.cfg.TRAIN.MODEL_DIR}/epoch-{epoch + 1}.model",
+                )
+                for opt_idx in range(len(optimizers)):
+                    torch.save(
+                        optimizers[opt_idx].state_dict(),
+                        f"{self.cfg.TRAIN.MODEL_DIR}/epoch-{epoch + 1}-opt{opt_idx}.opt",
+                    )
+                logging.info(f"[epoch {epoch + 1}]: Checkpoint created")
 
-    def predict(self):
+    def predict(self, test_dataset_loader, res_filename=None):
         self.cfg.DATA.FEATURES_PATH,
         self.cfg.DATA.VID_LIST_FILE_TEST,
         self.cfg.DATA.ACTIONS_DICT,
@@ -108,15 +107,11 @@ class BaseTrainer(ABC):
         with torch.no_grad():
             self.model.cuda()
 
-            for vid in list_of_vids:
-                features = np.load(
-                    os.path.join(self.cfg.DATA.FEATURES_PATH, f"{vid.split('.')[0]}.npy")
-                )[:, :: self.cfg.DATA.SAMPLE_RATE]
-                input_x = torch.tensor(features, dtype=torch.float).unsqueeze(0).cuda()
+            for test_sample in test_dataset_loader:
+                video, predicted_classes = self.get_eval_preds(test_sample, 
+                                                        actions_dict, self.cfg)
 
-                predicted_classes = self.get_eval_preds(input_x, actions_dict, self.cfg)
-
-                f_name = vid.split("/")[-1].split(".")[0]
+                f_name = video.split("/")[-1].split(".")[0]
                 with open(f"{self.cfg.TRAIN.RESULT_DIR}/{f_name}", "w") as f:
                     f.write("### Frame level recognition: ###\n")
                     f.write(" ".join(predicted_classes))
@@ -157,28 +152,40 @@ class BaseTrainer(ABC):
 
             f1 = np.nan_to_num(f1) * 100
             final.append(f1)
-            
-        np.savetxt(self.cfg.TRAIN.RES_FILENAME, np.array([final]), fmt="%1.2f")
+        
+        np.savetxt(res_filename if res_filename is not None else self.cfg.TRAIN.RES_FILENAME, 
+                   np.array([final]), fmt="%1.2f")
         return final
     
     
     def init_model(self, cfg):
-        """Hook method. Initialize the model to train. Must store into self.model variable."""
+        """Hook method. Initialize the model to train. Must store into `self.model`."""
         raise NotImplementedError
 
 
     def init_criterion(self, cfg):
-        """Hook method. Initialize the loss terms. Store criterion into the self object."""
+        """Hook method. Initialize the loss terms. Must store criterion objects into `self`."""
         raise NotImplementedError
 
 
     def get_optimizers(self, cfg):
-        """Hook method. Define the optimizers to use for training."""
+        """Hook method. Define the optimization protocols to use for training.
+
+        Returns:
+        A List of optimizers
+        """
         raise NotImplementedError()
     
 
     def get_schedulers(self, optimizers, cfg):
-        """Hook method. Define LR schedulers to use for training."""
+        """Hook method. Define LR schedulers to use for training.
+        
+        Args:
+        - `optimizers`: A List of optimizers
+
+        Returns:
+        A List of schedulers
+        """
         raise NotImplementedError()
     
 
@@ -186,7 +193,7 @@ class BaseTrainer(ABC):
         """Hook method. Defines model's training protocol.
         
         Args:
-        - `batch_train_data`: A batch of training data from the dataset
+        - `batch_train_data`: A batch of training data from the dataset. Default: (batch_input, batch_target, mask)
 
         Returns:
         A Tuple containing:
@@ -197,7 +204,8 @@ class BaseTrainer(ABC):
     
 
     def get_empty_metrics_accum_dict(self, cfg):
-        """Hook method. Creates the empty metrics accumulator dict at each epoch. Default for BatchGen data is provided."""
+        """Hook method. Creates the empty `metrics_accum_dict` at each epoch. 
+        Default implementation is provided."""
         return {
             "correct": 0,
             "total": 0
@@ -205,7 +213,14 @@ class BaseTrainer(ABC):
     
     
     def accumulate_metrics(self, metrics_accum_dict, batch_train_data, predictions, cfg):
-        """Hook method. Accumulate the necessary metrics into the metrics accumulator dict."""
+        """Hook method. Allows Trainers to accumulate metrics into the `metrics_accum_dict`. 
+        Called after the model is trained on a batch. Default implementation is provided.
+        
+        Args:
+        - `metrics_accum_dict`: Dictionary containing metrics accumulated throughout the current epoch
+        - `batch_train_data`: Current batch of training data. Default: (batch_input, batch_target, mask)
+        - `predictions`: Predictions for the current batch of training data
+        """
         _, batch_target, mask = batch_train_data
         _, predicted = torch.max(predictions[-1].data, 1)
 
@@ -216,21 +231,31 @@ class BaseTrainer(ABC):
         metrics_accum_dict["total"] += torch.sum(mask[:, 0, :]).item()
         
 
-    def score_accumulated_metrics(self, metrics_accum_dict, cfg):
-        """Hook method. Return the scores to report from the accumulated metrics from the epoch."""
+    def score_accumulated_metrics(self, metrics_accum_dict, epoch_loss, train_dataset_loader, cfg):
+        """Hook method. Return the scores to report from the accumulated metrics after a training epoch. 
+        Default implementation is provided.
+        
+        Args:
+        - `metrics_accum_dict`: Dictionary containing metrics accumulated throughout the current epoch
+        - `epoch_loss`: Total epoch loss
+        - `train_dataset_loader`: The dataset loader for retrieval of dataset statistics
+        """
         return {
+            "epoch loss": float(epoch_loss / len(train_dataset_loader.list_of_examples)),
             "acc": float(metrics_accum_dict["correct"]) / metrics_accum_dict["total"]
         }
 
 
-    def get_eval_preds(self, test_input, actions_dict, cfg):
+    def get_eval_preds(self, test_sample, actions_dict, cfg):
         """Hook method. Defines model's evaluation protocol.
         
         Args:
-        - `test_input`: The test sample
+        - `test_sample`: The test sample. Default: (video, sampled_feats)
         - `actions_dict`: The dictionary of action indices to labels
 
         Returns:
-        A List `predicted_classes` containing the frame-wise label predictions for each frame in the test sample
+        A Tuple containing:
+        - a str `video` containing the name of the sample
+        - a List `predicted_classes` containing the frame-wise label predictions for each frame in the test sample
         """
         raise NotImplementedError()

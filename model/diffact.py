@@ -6,8 +6,13 @@ import numpy as np
 import time as Time
 import torch.nn as nn
 import torch.nn.functional as F
-from scipy.ndimage import gaussian_filter1d
+from scipy import stats
+from scipy.ndimage import gaussian_filter1d, median_filter, generic_filter
+from torch import optim
+from eval import get_labels_start_end_time
+from dataset.diffact_data import restore_full_sequence
 from model.base import BaseTrainer
+from utils.misc import cfg_convert_to_dict
 
 ########################################################################################
 
@@ -73,13 +78,15 @@ def denormalize(x, scale):  # [-scale, scale] > [0,1]
 
 
 class ASDiffusionModel(nn.Module):
-    def __init__(self, encoder_params, decoder_params, diffusion_params, num_classes):
+    def __init__(self, encoder_params, decoder_params, diffusion_params, num_classes, input_dim):
         super(ASDiffusionModel, self).__init__()
 
-        encoder_params = encoder_params.to_container()
-        decoder_params = decoder_params.to_container()
-        diffusion_params = diffusion_params.to_contianer()
+        encoder_params = cfg_convert_to_dict(encoder_params,[])
+        decoder_params = cfg_convert_to_dict(decoder_params,[])
+        diffusion_params = cfg_convert_to_dict(diffusion_params,[])
+
         encoder_params = {key.lower(): value for key, value in encoder_params.items()}
+        encoder_params["input_dim"] = input_dim # Manually insert for compatibility with original code
         decoder_params = {key.lower(): value for key, value in decoder_params.items()}
         diffusion_params = {
             key.lower(): value for key, value in diffusion_params.items()
@@ -98,7 +105,7 @@ class ASDiffusionModel(nn.Module):
         self.sampling_timesteps = diffusion_params["sampling_timesteps"]
         assert self.sampling_timesteps <= timesteps
         self.ddim_sampling_eta = diffusion_params["ddim_sampling_eta"]
-        self.scale = diffusion_params.SNR_SCALE
+        self.scale = diffusion_params['snr_scale']
 
         self.register_buffer("betas", betas)
         self.register_buffer("alphas_cumprod", alphas_cumprod)
@@ -394,7 +401,7 @@ class ASDiffusionModel(nn.Module):
             "decoder_boundary_loss": decoder_boundary_loss,
         }
 
-        return loss_dict
+        return loss_dict, event_out
 
     @torch.no_grad()
     def ddim_sample(self, video_feats, seed=None):
@@ -431,7 +438,7 @@ class ASDiffusionModel(nn.Module):
         x_start = None
         for time, time_next in time_pairs:
 
-            time_cond = torch.full((1,), time, dtype=torch.long).cuda
+            time_cond = torch.full((1,), time, dtype=torch.long).cuda()
 
             pred_noise, x_start = self.model_predictions(
                 backbone_feats, x_time, time_cond
@@ -885,12 +892,217 @@ class MixedConvAttentionLayer(nn.Module):
         return x + out
 
 
-class DiffusionTrainer(BaseTrainer):
+class DiffActTrainer(BaseTrainer):
 
-    def __init__(self, cfg):
+    # Override
+    def init_model(self, cfg):
         self.model = ASDiffusionModel(
-            cfg.MODEL.PARAMS.ENCODER_PARAMS,
-            cfg.MODEL.PARAMS.DECODER_PARMS,
-            cfg.MODEL.PARAMS.DIFFUSION_PARAMS,
+            cfg.MODEL.PARAMS.ENCODER_PARAMS, 
+            cfg.MODEL.PARAMS.DECODER_PARAMS, 
+            cfg.MODEL.PARAMS.DIFFUSION_PARAMS, 
             cfg.DATA.NUM_CLASSES,
+            cfg.DATA.FEATURE_DIM
         )
+
+
+    # Override
+    def init_criterion(self, cfg):
+        self.ce_criterion = None # To be initialized in overridden train()
+        self.bce_criterion = nn.BCELoss(reduction='none')
+        self.mse_criterion = nn.MSELoss(reduction='none')
+
+
+    # Override
+    def train(self, train_dataset_loader):
+
+        # Hack to get class weights from VideoFeatureDataset
+        dataset = train_dataset_loader.dataset
+        # Initialize the cross-entropy criterion
+        if self.cfg.TRAIN.CLASS_WEIGHTING:
+            class_weights = dataset.get_class_weights()
+            class_weights = torch.from_numpy(class_weights).float().cuda()
+            self.ce_criterion = nn.CrossEntropyLoss(ignore_index=-100, weight=class_weights, reduction='none')
+        else:
+            self.ce_criterion = nn.CrossEntropyLoss(ignore_index=-100, reduction='none')
+
+        # Resume flow of base class
+        super(DiffActTrainer, self).train(train_dataset_loader)
+
+
+    # Override
+    def get_optimizers(self, cfg):
+        return [optim.Adam(self.model.parameters(), 
+                           lr=cfg.TRAIN.LR, 
+                           weight_decay=cfg.TRAIN.WEIGHT_DECAY)]
+
+
+    # Override
+    def get_schedulers(self, optimizers, cfg):
+        return [] # No schedulers
+
+
+    # Override
+    def get_train_loss_preds(self, batch_train_data, cfg):
+
+        batch_loss = 0
+        batch_preds = []
+
+        # Based on original code where only one sample at a time is passed to get_training_loss()
+        # to account for different video lengths
+        for feature, label, boundary, video in batch_train_data:
+            feature, label, boundary = feature.cuda(), label.cuda(), boundary.cuda()
+            
+            loss_dict, event_out = self.model.get_training_loss(feature, 
+                event_gt=F.one_hot(label.long(), num_classes=cfg.DATA.NUM_CLASSES).permute(0, 2, 1),
+                boundary_gt=boundary,
+                encoder_ce_criterion=self.ce_criterion, 
+                encoder_mse_criterion=self.mse_criterion,
+                encoder_boundary_criterion=self.bce_criterion,
+                decoder_ce_criterion=self.ce_criterion,
+                decoder_mse_criterion=self.mse_criterion,
+                decoder_boundary_criterion=self.bce_criterion,
+                soft_label=cfg.TRAIN.SOFT_LABEL
+            )
+
+            # ##############
+            # # feature    torch.Size([1, F, T])
+            # # label      torch.Size([1, T])
+            # # boundary   torch.Size([1, 1, T])
+            # # output    torch.Size([1, C, T]) 
+            # ##################
+            
+            sample_loss = 0
+
+            for k,v in loss_dict.items():
+                sample_loss += cfg.LOSS_WEIGHTS[k.upper()] * v
+
+            batch_loss += (sample_loss / cfg.TRAIN.BZ)
+            batch_preds.append(event_out)
+
+        return batch_loss, batch_preds
+
+
+    # Override
+    def accumulate_metrics(self, metrics_accum_dict, batch_train_data, predictions, cfg):
+        for batch_idx in range(len(batch_train_data)):
+            _, label, _, _ = batch_train_data[batch_idx]  # label torch.Size([1, T])
+            _, predicted = torch.max(predictions[batch_idx].data, 1)
+
+            metrics_accum_dict["correct"] += torch.sum(predicted.cpu() == label)
+            metrics_accum_dict["total"] += label.shape[-1] # No. of frames
+
+
+    # Override
+    def score_accumulated_metrics(self, metrics_accum_dict, epoch_loss, train_dataset_loader, cfg):
+        """Hook method. Return the scores to report from the accumulated metrics from the epoch."""
+        return {
+            "epoch loss": float(epoch_loss / len(train_dataset_loader.dataset.video_list)),
+            "acc": float(metrics_accum_dict["correct"]) / metrics_accum_dict["total"]
+        }
+
+
+    # Override
+    def get_eval_preds(self, test_sample, actions_dict, cfg):
+        # Default mode suggested in original DiffAct code is "decoder-agg"
+        video, predictions = self.test_single_video(test_sample, "decoder-agg", cfg)
+        predicted_classes = [
+            list(actions_dict.keys())[
+                list(actions_dict.values()).index(pred.item())
+            ] for pred in predictions]
+        return video, predicted_classes
+
+
+    def test_single_video(self, test_sample, mode, cfg):
+
+        assert(mode in ['encoder', 'decoder-noagg', 'decoder-agg'])
+        assert(cfg.MODEL.PARAMS.POSTPROCESS.TYPE in ['median', 'mode', 'purge', None])
+
+        if cfg.TRAIN.SET_SAMPLING_SEED:
+            seed = cfg.TRAIN.SEED
+        else:
+            seed = None
+            
+        with torch.no_grad():
+            sample_rate = cfg.DATA.SAMPLE_RATE
+
+            feature, label, _, video = test_sample
+
+            # feature:   [torch.Size([1, F, Sampled T])]
+            # label:     torch.Size([1, Original T])
+            # output: [torch.Size([1, C, Sampled T])]
+
+            if mode == 'encoder':
+                output = [self.model.encoder(feature[i].cuda()) 
+                       for i in range(len(feature))] # output is a list of tuples
+                output = [F.softmax(i, 1).cpu() for i in output]
+                left_offset = sample_rate // 2
+                right_offset = (sample_rate - 1) // 2
+
+            if mode == 'decoder-agg':
+                output = [self.model.ddim_sample(feature[i].cuda(), seed) 
+                           for i in range(len(feature))] # output is a list of tuples
+                output = [i.cpu() for i in output]
+                left_offset = sample_rate // 2
+                right_offset = (sample_rate - 1) // 2
+
+            if mode == 'decoder-noagg':  # temporal aug must be true
+                output = [self.model.ddim_sample(feature[len(feature)//2].cuda(), seed)] # output is a list of tuples
+                output = [i.cpu() for i in output]
+                left_offset = sample_rate // 2
+                right_offset = 0
+
+            assert(output[0].shape[0] == 1)
+
+            min_len = min([i.shape[2] for i in output])
+            output = [i[:,:,:min_len] for i in output]
+            output = torch.cat(output, 0)  # torch.Size([sample_rate, C, T])
+            output = output.mean(0).numpy()
+
+            if cfg.MODEL.PARAMS.POSTPROCESS.TYPE == 'median': # before restoring full sequence
+                smoothed_output = np.zeros_like(output)
+                for c in range(output.shape[0]):
+                    smoothed_output[c] = median_filter(output[c], size=cfg.MODEL.PARAMS.POSTPROCESS.VALUE)
+                output = smoothed_output / smoothed_output.sum(0, keepdims=True)
+
+            output = np.argmax(output, 0)
+
+            output = restore_full_sequence(output, 
+                full_len=label.shape[-1], 
+                left_offset=left_offset, 
+                right_offset=right_offset, 
+                sample_rate=sample_rate
+            )
+
+            if cfg.MODEL.PARAMS.POSTPROCESS.TYPE == 'mode': # after restoring full sequence
+                output = self.mode_filter(output, cfg.MODEL.PARAMS.POSTPROCESS.VALUE)
+
+            if cfg.MODEL.PARAMS.POSTPROCESS.TYPE == 'purge':
+
+                trans, starts, ends = get_labels_start_end_time(output)
+                
+                for e in range(0, len(trans)):
+                    duration = ends[e] - starts[e]
+                    if duration <= cfg.MODEL.PARAMS.POSTPROCESS.VALUE:
+                        
+                        if e == 0:
+                            output[starts[e]:ends[e]] = trans[e+1]
+                        elif e == len(trans) - 1:
+                            output[starts[e]:ends[e]] = trans[e-1]
+                        else:
+                            mid = starts[e] + duration // 2
+                            output[starts[e]:mid] = trans[e-1]
+                            output[mid:ends[e]] = trans[e+1]
+
+            label = label.squeeze(0).cpu().numpy()
+
+            assert(output.shape == label.shape)
+            
+            return video, output
+    
+    
+    def mode_filter(self, x, size):
+        def modal(P):
+            mode = stats.mode(P, keepdims=True)
+            return mode.mode[0]
+        result = generic_filter(x, modal, size)
+        return result

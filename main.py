@@ -9,21 +9,32 @@ import time
 import numpy as np
 import torch
 
-from dataset.batch_gen import BatchGenerator
+from dataset.batch_gen import BatchGenerator, TestSampleGenerator
+from dataset.diffact_data import get_data_loader
 from config import cfg, update_config
 from model.asformer import ASFormerTrainer
 from model.mstcn import MSTCNTrainer
+from model.diffact import DiffActTrainer
 from model.c2f import C2FTrainer
 from utils.misc import read_actions, seconds_to_hours, set_seed
 
 
 def get_train_dataset_loader(cfg):
     if cfg.MODEL.NAME == "diffact":
-        raise NotImplementedError
+        return get_data_loader(cfg, mode="train")
     else:
         batch_gen = BatchGenerator(cfg)
         batch_gen.read_data(cfg.DATA.VID_LIST_FILE)
         return batch_gen
+    
+
+def get_test_dataset_loader(cfg):
+    if cfg.MODEL.NAME == "diffact":
+        return get_data_loader(cfg, mode="test")
+    else:
+        test_gen = TestSampleGenerator(cfg)
+        test_gen.read_data(cfg.DATA.VID_LIST_FILE_TEST)
+        return test_gen
     
 
 def get_trainer(cfg):
@@ -31,6 +42,8 @@ def get_trainer(cfg):
         return MSTCNTrainer(cfg)
     elif cfg.MODEL.NAME == "asformer":
         return ASFormerTrainer(cfg)
+    elif cfg.MODEL.NAME == "diffact":
+        return DiffActTrainer(cfg)
     elif cfg.MODEL.NAME == "c2f":
         return C2FTrainer(cfg)
 
@@ -39,15 +52,15 @@ def train(cfg):
     set_seed(cfg.TRAIN.SEED)
     trainer = get_trainer(cfg)
 
-    train_dataset_loader = get_train_dataset_loader(cfg)
-
     logging.info(f"------ Training ---------")
+    train_dataset_loader = get_train_dataset_loader(cfg)
     start_time = time.time()
     logging.info(f"Starting time: {start_time}")
     trainer.train(train_dataset_loader)
 
     logging.info("------ Evaluation ---------")
-    scores = trainer.predict()
+    test_dataset_loader = get_test_dataset_loader(cfg)
+    scores = trainer.predict(test_dataset_loader)
     logging.info(f"{scores}")
 
     end_time = time.time()
@@ -60,13 +73,31 @@ def train(cfg):
 
 def eval(cfg):
     trainer = get_trainer(cfg)
-    trainer.model.load_state_dict(
-        torch.load(f"{cfg.TRAIN.MODEL_DIR}/epoch-{cfg.TRAIN.NUM_EPOCHS}.model")
-    )
+    test_dataset_loader = get_test_dataset_loader(cfg)
+
+    if cfg.TRAIN.EVAL_CHCKPTS:
+         # eval all checkpointed epochs
+        chckpt_epochs = list(range(cfg.TRAIN.CHCKPT_FREQ, cfg.TRAIN.NUM_EPOCHS, cfg.TRAIN.CHCKPT_FREQ))
+    else:
+        chckpt_epochs = []
+    # always eval the last epoch's model
+    chckpt_epochs.append(cfg.TRAIN.NUM_EPOCHS)
 
     logging.info("------ Evaluation ---------")
-    scores = trainer.predict()
-    logging.info(f"{scores}")
+    res_dir, res_file = os.path.split(cfg.TRAIN.RES_FILENAME)
+
+    eval_dir = os.path.join(res_dir, "eval")
+    os.makedirs(eval_dir, exist_ok=True)
+
+    with open(os.path.join(eval_dir, f"all_epochs_" + res_file), "w") as eval_fp:
+        for chckpt_epoch in chckpt_epochs:
+            logging.info(f"Loading model saved at epoch {chckpt_epoch}")
+            trainer.model.load_state_dict(
+                torch.load(f"{cfg.TRAIN.MODEL_DIR}/epoch-{chckpt_epoch}.model"))
+            scores = trainer.predict(test_dataset_loader, 
+                                    os.path.join(eval_dir, f"epoch_{chckpt_epoch}_" + res_file))
+            logging.info(f"{scores}")
+            eval_fp.write(f"{chckpt_epoch} {' '.join(['{:1.2f}'.format(score) for score in scores])}\n")
 
 
 def extra_train_config(cfg):
@@ -104,7 +135,7 @@ def extra_train_config(cfg):
     cfg.TRAIN.RES_FILENAME = f"{cfg.TRAIN.LOG_DIR}/{cfg.TRAIN.EXP_NAME}.txt"
     cfg.TRAIN.CFG_FILENAME = f"{cfg.TRAIN.LOG_DIR}/{cfg.TRAIN.EXP_NAME}.yaml"
     cfg.freeze()
-    with open(cfg.TRAIN.CONF_FILENAME, "w") as f:
+    with open(cfg.TRAIN.CFG_FILENAME, "w") as f:
         f.write(cfg.dump())
 
 
@@ -128,7 +159,7 @@ if __name__ == "__main__":
     update_config(cfg, args)
 
     # eval
-    if cfg.TRAIN.EVAL:
+    if cfg.TRAIN.EVAL or cfg.TRAIN.EVAL_CHCKPTS:
         log_redirect(cfg.TRAIN.LOG_FILENAME)
 
         logging.info(pprint.pformat(args))
